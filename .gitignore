@@ -26,8 +26,12 @@ data/backups/
 # Processed data (generated — do not commit)
 # ---------------------------------------------------------------------------
 data/processed/
+data/processes/
+*.cache
+*.cache.npy
 data/metadata/*
 !data/metadata/image_inventory.csv
+!data/metadata/.gitkeep
 
 # ---------------------------------------------------------------------------
 # Annotations (human labels — tracked in git)
@@ -93,6 +97,7 @@ secrets.yml
 # ---------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
 .agents/

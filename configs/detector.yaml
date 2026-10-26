@@ -1,19 +1,7 @@
-# YOLOv8 / YOLO11 Dataset Configuration for Pothole Verification
-# Combines RDD2022 benchmark data with local Green Bay annotations
+# YOLO Dataset Configuration - Generated from RDD2022
+path: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022
+train: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022/train.txt
+val: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022/val.txt
 
-# Root directory of the repository (or absolute path on the lab machine)
-path: .
-
-# Training sets: YOLO supports multiple path files or directories in a list
-train:
-  - data/processed/rdd2022/train.txt      # Converted RDD2022 training set
-  - exports/yolo_labels/train.txt         # Local Green Bay annotated images
-
-# Validation set: evaluate detection performance
-val:
-  - data/processed/rdd2022/val.txt        # Held-out RDD2022 validation set
-  # - exports/yolo_labels/val.txt         # Optional: held-out local road split
-
-# Classes: Both RDD2022 D40 and Green Bay annotations use class 0 for pothole
 names:
   0: pothole
