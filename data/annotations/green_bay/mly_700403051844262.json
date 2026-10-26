@@ -1,0 +1,30 @@
+{
+  "image_id": "mly_700403051844262",
+  "source_filepath": "data/raw/mapillary/segment_002/images/700403051844262.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 428,
+      "y": 1065,
+      "w": 361,
+      "h": 93,
+      "subtype": "shadow"
+    },
+    {
+      "x": 718,
+      "y": 941,
+      "w": 170,
+      "h": 150,
+      "subtype": "shadow"
+    }
+  ],
+  "annotation_version": 1
+}

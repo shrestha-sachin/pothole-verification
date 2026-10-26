@@ -1,0 +1,23 @@
+{
+  "image_id": "mly_1394753358119800",
+  "source_filepath": "data/raw/mapillary/segment_001/images/1394753358119800.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": true,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 1744,
+      "y": 1265,
+      "w": 301,
+      "h": 260,
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1
+}

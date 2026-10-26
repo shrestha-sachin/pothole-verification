@@ -26,17 +26,20 @@ data/backups/
 # Processed data (generated — do not commit)
 # ---------------------------------------------------------------------------
 data/processed/
-data/metadata/
+data/metadata/*
+!data/metadata/image_inventory.csv
 
 # ---------------------------------------------------------------------------
-# Annotations (human labels — commit only via explicit git add -f)
+# Annotations (human labels — tracked in git)
 # ---------------------------------------------------------------------------
-data/annotations/
+# data/annotations/ is tracked so labels sync between Mac and Lab computers
+
 
 # ---------------------------------------------------------------------------
-# Exports (regenerated from annotations)
+# Exports (YOLO labels for training — tracked in git)
 # ---------------------------------------------------------------------------
-exports/
+exports/*
+!exports/yolo_labels/
 
 # ---------------------------------------------------------------------------
 # Model weights and training artefacts
