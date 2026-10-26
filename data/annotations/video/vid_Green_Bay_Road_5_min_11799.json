@@ -1,0 +1,22 @@
+{
+  "image_id": "vid_Green_Bay_Road_5_min_11799",
+  "source_filepath": "data/processed/video_frames/Green_Bay_Road_5_min/Green_Bay_Road_5_min_t000000200007.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [
+    {
+      "x": 1072,
+      "y": 2061,
+      "w": 320,
+      "h": 70
+    }
+  ],
+  "negative_regions": [],
+  "annotation_version": 1
+}

@@ -1,0 +1,44 @@
+{
+  "image_id": "vid_Green_Bay_Road_5_min_06961",
+  "source_filepath": "data/processed/video_frames/Green_Bay_Road_5_min/Green_Bay_Road_5_min_t000000117997.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 353,
+      "y": 1629,
+      "w": 348,
+      "h": 66,
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 517,
+      "y": 1483,
+      "w": 338,
+      "h": 103,
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1490,
+      "y": 1455,
+      "w": 306,
+      "h": 80,
+      "subtype": "manhole"
+    },
+    {
+      "x": 1401,
+      "y": 1431,
+      "w": 602,
+      "h": 169,
+      "subtype": "manhole"
+    }
+  ],
+  "annotation_version": 1
+}

@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -121,7 +122,9 @@ def load_annotation(image_id: str) -> dict | None:
 def export(output_dir: Path) -> None:
     inventory = load_inventory()
     labels_dir = output_dir / "labels"
+    images_dir = output_dir / "images"
     labels_dir.mkdir(parents=True, exist_ok=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_rows: list[dict] = []
     image_paths: list[str] = []
@@ -168,23 +171,43 @@ def export(output_dir: Path) -> None:
         temp_path.write_text("\n".join(yolo_lines) + ("\n" if yolo_lines else ""), encoding="utf-8")
         temp_path.replace(label_path)
 
+        # Link image into exports/yolo_labels/images/ for YOLO standard dataset matching
+        raw_src = inv_row.get("filepath", "")
+        src_path = (PROJECT_ROOT / raw_src).resolve() if raw_src else None
+        linked_img_path = raw_src
+
+        if src_path and src_path.exists():
+            link_target = images_dir / f"{image_id}{src_path.suffix}"
+            try:
+                if link_target.exists() or link_target.is_symlink():
+                    link_target.unlink()
+                # Relative symlink so it remains valid if directory moves
+                rel_target = os.path.relpath(src_path, images_dir)
+                os.symlink(rel_target, link_target)
+                linked_img_path = rel(link_target)
+            except OSError:
+                linked_img_path = rel(src_path)
+
         if yolo_lines:
             exported_pos += 1
         else:
             exported_neg += 1
 
-        image_paths.append(inv_row.get("filepath", ""))
+        image_paths.append(linked_img_path)
         manifest_rows.append({
             "image_id": image_id,
             "label_file": rel(label_path),
-            "image_path": inv_row.get("filepath", ""),
+            "image_path": raw_src,
             "pothole_boxes": len(yolo_lines),
             "is_negative": "1" if not yolo_lines else "0",
         })
 
-    # ---- image_paths.txt ------------------------------------------------
+    # ---- image_paths.txt & train.txt -----------------------------------
     paths_file = output_dir / "image_paths.txt"
-    paths_file.write_text("\n".join(image_paths) + "\n", encoding="utf-8")
+    train_file = output_dir / "train.txt"
+    content = "\n".join(image_paths) + "\n"
+    paths_file.write_text(content, encoding="utf-8")
+    train_file.write_text(content, encoding="utf-8")
 
     # ---- export_manifest.csv -------------------------------------------
     manifest_path = output_dir / "export_manifest.csv"
