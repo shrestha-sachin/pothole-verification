@@ -1,0 +1,22 @@
+# Core ML / detection (installed in .venv)
+# torch and torchvision are installed via PyTorch index -- see README.
+ultralytics>=8.0
+
+# Image processing
+Pillow>=10.0
+opencv-python>=4.8
+
+# Data / numerics
+numpy>=1.24
+pandas>=2.0
+
+# HTTP (Mapillary downloader)
+requests>=2.31
+urllib3>=2.0
+
+# Annotation dashboard
+streamlit>=1.35
+streamlit-drawable-canvas>=0.9.3
+
+# Utilities
+pyyaml>=6.0
