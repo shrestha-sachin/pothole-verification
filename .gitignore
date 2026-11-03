@@ -113,3 +113,15 @@ desktop.ini
 # Streamlit
 # ---------------------------------------------------------------------------
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Databases & Local Results (runtime artefacts — do not commit)
+# ---------------------------------------------------------------------------
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+results/*
+!results/.gitkeep

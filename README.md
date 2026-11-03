@@ -1,14 +1,94 @@
-# Pothole Verification — Data Preparation & Annotation
+# Pothole Verification — Detection Dashboard & Annotation Tool
 
 **CS Capstone:** *Reducing False Pothole Reports from Smartphone Video via Visual Verification*
 
-This repository contains:
-- A YOLOv8n detector for potholes in full road images
-- An ImageNet-pretrained MobileNetV3-Small verifier to filter false detections (shadows, patches, manholes)
-- A local Streamlit annotation tool for the Green Bay pilot dataset
-- Scripts for inventory building, frame extraction, YOLO export, and verifier crop generation
+This repository contains the full system for detecting, grouping, reviewing, and comparing pothole
+candidate events from road video using YOLO11n + BoT-SORT + MobileNetV3-Small.
 
 ---
+
+## Quick Start — Main Dashboard (Phase 1)
+
+```bash
+# 1. Activate virtual environment
+source .venv/bin/activate
+
+# 2. Launch the detection/review dashboard
+streamlit run dashboard/app.py
+```
+
+Opens at `http://localhost:8501`.
+
+### Workflow
+1. **Process Video** — select your `best.pt` checkpoint and a road video, adjust FPS / confidence, click **Analyze Video**
+2. **Review Events** — inspect each grouped candidate event (image, timestamp, confidence, policy flags), confirm / reject / mark uncertain
+3. **Export** — download a CSV report with all events and review decisions
+4. **Overview** — summary statistics and charts across all processed videos
+
+> **Note:** The existing annotation tool is still at `streamlit run dashboard/annotate.py`
+
+---
+
+## Architecture
+
+```
+Video → Frame sampler (5 FPS) → YOLO11n detector → BoT-SORT tracker
+                                                         ↓
+                                               Candidate events grouped
+                                                         ↓
+                              ┌──────────────────────────┤
+                              │ Policy A: conf threshold  │
+                              │ Policy B: ≥2 detections   │
+                              │ Policy C: MobileNetV3 (*)  │
+                              └──────────────────────────┘
+                                                         ↓
+                                         SQLite DB + Evidence images
+                                                         ↓
+                                    Human review → CSV export
+```
+
+(*) Policy C verifier not trained yet; dashboard shows "Verifier not configured" gracefully.
+
+---
+
+## Module Layout (new files)
+
+| File | Purpose |
+|------|---------|
+| `dashboard/app.py` | **New** — Main detection/review Streamlit dashboard |
+| `src/detector/inference.py` | YOLO11n wrapper (load-once singleton) |
+| `src/detector/video_sampler.py` | Frame sampler preserving original timestamps |
+| `src/tracking/event_grouper.py` | BoT-SORT event grouper + evidence extractor |
+| `src/verifier/interface.py` | MobileNetV3-Small verifier (graceful stub) |
+| `src/evaluation/policies.py` | Policy A/B/C application on shared events |
+| `src/database.py` | SQLite persistence (videos, events, detections, reviews) |
+
+---
+
+## Model checkpoints
+
+| Checkpoint | Location | Purpose |
+|-----------|----------|---------|
+| `yolo11n.pt` | project root | Base COCO YOLO11n (autodownloaded) |
+| `models/best.pt` | `models/` (git-ignored) | **Your fine-tuned pothole detector** — place here |
+| `models/verifier_v1.pt` | `models/` (git-ignored) | MobileNetV3-Small verifier (not trained yet) |
+
+---
+
+## Installation
+
+```bash
+# Python 3.11+ recommended
+python -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+pip install lapx          # BoT-SORT Hungarian solver
+pip install torchvision   # for MobileNetV3 verifier (when ready)
+```
+
+---
+
 
 ## Quick Start (Mac, local annotation workflow)
 

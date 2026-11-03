@@ -1292,7 +1292,7 @@ def render_canvas_studio(is_fullscreen: bool = False) -> None:
 
     # Box Chip Bar
     if total_boxes == 0:
-        st.caption("💡 Shortcuts: 1-4 Class | Ctrl+Z Undo | Ctrl+Y Redo | Backspace Del Last | +/- Zoom | 0 Reset | F Fullscreen")
+        st.caption("Shortcuts: 1-4 Class | Ctrl+Z Undo | Ctrl+Y Redo | Backspace Del Last | +/- Zoom | 0 Reset | F Fullscreen")
     else:
         chips = []
         if num_p > 0:

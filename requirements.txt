@@ -20,3 +20,11 @@ streamlit-drawable-canvas>=0.9.3
 
 # Utilities
 pyyaml>=6.0
+
+# Tracking support (Hungarian algorithm for BoT-SORT)
+# Install with: pip install lapx
+lapx
+
+# Verifier (MobileNetV3-Small) — torchvision must match your torch version
+# Install with: pip install torchvision
+# torchvision>=0.15
