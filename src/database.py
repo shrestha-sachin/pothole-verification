@@ -570,3 +570,86 @@ class Database:
                 )
                 reattached += 1
         return reattached
+
+    def get_video_stats(self, video_id: str) -> dict:
+        """Return event, detection, and review counts along with processing status for a video."""
+        with self._conn() as conn:
+            v_row = conn.execute(
+                "SELECT processing_status FROM videos WHERE video_id = ?", (video_id,)
+            ).fetchone()
+            status = v_row[0] if v_row else "unknown"
+            event_count = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE video_id = ?", (video_id,)
+            ).fetchone()[0]
+            detection_count = conn.execute(
+                "SELECT COUNT(*) FROM detections WHERE video_id = ?", (video_id,)
+            ).fetchone()[0]
+            review_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM reviews r
+                JOIN events e ON r.event_id = e.event_id
+                WHERE e.video_id = ?
+                """,
+                (video_id,),
+            ).fetchone()[0]
+        return {
+            "status": status,
+            "event_count": event_count,
+            "detection_count": detection_count,
+            "review_count": review_count,
+        }
+
+    def delete_video_data(self, video_id: str, clear_reviews: bool = True, reset_status: bool = True) -> int:
+        """Remove events and detections (and reviews) for a video, optionally resetting status to 'pending'."""
+        with self._conn() as conn:
+            event_count = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE video_id = ?", (video_id,)
+            ).fetchone()[0]
+        self.delete_events_for_video(video_id, clear_reviews=clear_reviews)
+        if reset_status:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE videos
+                    SET processing_status = 'pending',
+                        processing_started = NULL,
+                        processing_finished = NULL,
+                        processing_error = NULL,
+                        total_frames_sampled = 0
+                    WHERE video_id = ?
+                    """,
+                    (video_id,),
+                )
+        return event_count
+
+    def delete_video(self, video_id: str, clear_reviews: bool = True) -> bool:
+        """Remove a video completely from the database (metadata, events, detections, reviews)."""
+        self.delete_video_data(video_id, clear_reviews=clear_reviews, reset_status=False)
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM videos WHERE video_id = ?", (video_id,))
+            return cur.rowcount > 0
+
+    def purge_all_inference_data(self, clear_reviews: bool = True) -> dict:
+        """Purge all events, detections, and reviews across all videos, resetting statuses to 'pending'."""
+        with self._conn() as conn:
+            n_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            n_detections = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+            n_reviews = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+            conn.execute("DELETE FROM reviews")
+            conn.execute("DELETE FROM detections")
+            conn.execute("DELETE FROM events")
+            conn.execute(
+                """
+                UPDATE videos
+                SET processing_status = 'pending',
+                    processing_started = NULL,
+                    processing_finished = NULL,
+                    processing_error = NULL,
+                    total_frames_sampled = 0
+                """
+            )
+        return {
+            "events_deleted": n_events,
+            "detections_deleted": n_detections,
+            "reviews_deleted": n_reviews,
+        }

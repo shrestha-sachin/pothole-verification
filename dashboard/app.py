@@ -203,6 +203,37 @@ MODELS_DIR = PROJECT_ROOT / "models"
 
 EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+def get_evidence_disk_usage(video_id: str | None = None) -> tuple[int, float]:
+    """Calculate file count and size (MB) of evidence on disk."""
+    target_dir = (EVIDENCE_ROOT / video_id) if video_id else EVIDENCE_ROOT
+    if not target_dir.exists():
+        return 0, 0.0
+    file_count = 0
+    total_bytes = 0
+    for p in target_dir.rglob("*"):
+        if p.is_file():
+            file_count += 1
+            total_bytes += p.stat().st_size
+    return file_count, total_bytes / (1024 * 1024)
+
+
+def delete_evidence_disk(video_id: str | None = None) -> tuple[int, float]:
+    """Remove evidence folder for a specific video or all videos. Returns (file_count, size_mb)."""
+    import shutil
+    target_dir = (EVIDENCE_ROOT / video_id) if video_id else EVIDENCE_ROOT
+    if not target_dir.exists():
+        return 0, 0.0
+    file_count, size_mb = get_evidence_disk_usage(video_id)
+    if video_id:
+        shutil.rmtree(target_dir, ignore_errors=True)
+    else:
+        for item in target_dir.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                item.unlink(missing_ok=True)
+    return file_count, size_mb
+
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -212,9 +243,14 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 def get_db() -> Database:
-    if "db" not in st.session_state:
-        st.session_state["db"] = Database(DB_PATH)
-    return st.session_state["db"]
+    inst = st.session_state.get("db")
+    if inst is None or not hasattr(inst, "get_video_stats"):
+        import importlib
+        import src.database
+        importlib.reload(src.database)
+        inst = src.database.Database(DB_PATH)
+        st.session_state["db"] = inst
+    return inst
 
 
 def fmt_ts(ms: int) -> str:
@@ -364,6 +400,67 @@ def page_overview():
                 lambda v: f"{v:.1f}s" if pd.notna(v) else "—"
             )
         st.dataframe(display, use_container_width=True, hide_index=True)
+
+        st.write("")
+        st.markdown('<div class="section-title">Video Operations & Data Management</div>', unsafe_allow_html=True)
+
+        col_v_sel, col_v_act1, col_v_act2 = st.columns([3, 1.5, 1.5])
+        with col_v_sel:
+            sel_ov_vid = st.selectbox(
+                "Select video to manage",
+                [v["video_id"] for v in videos],
+                key="ov_sel_vid",
+                label_visibility="collapsed",
+            )
+            v_st = db.get_video_stats(sel_ov_vid)
+            v_f, v_sz = get_evidence_disk_usage(sel_ov_vid)
+            badge_cls = "badge-confirmed" if v_st["status"] == "done" else "badge-unreviewed"
+            st.markdown(
+                f'<span class="status-badge {badge_cls}">{v_st["status"].upper()}</span> &nbsp; '
+                f'<span style="font-size: 0.82rem; color: #64748b; font-weight: 500;">'
+                f'{v_st["event_count"]} events &nbsp;•&nbsp; {v_f} evidence files ({v_sz:.1f} MB)'
+                f'</span>',
+                unsafe_allow_html=True,
+            )
+        with col_v_act1:
+            with st.popover("🔄 Reset Results", use_container_width=True):
+                st.markdown(f"**Reset `{sel_ov_vid}`?**")
+                st.caption("Clears candidate events and disk evidence. Sets status back to pending.")
+                clr_rev_rst = st.checkbox("Also delete human reviews", value=False, key="ov_pop_rst_rev")
+                if st.button("Confirm Reset", type="primary", key="ov_confirm_reset_btn", use_container_width=True):
+                    n_ev = db.delete_video_data(sel_ov_vid, clear_reviews=clr_rev_rst, reset_status=True)
+                    n_f, _ = delete_evidence_disk(sel_ov_vid)
+                    st.success(f"Reset complete: {n_ev} events and {n_f} files cleared.")
+                    time.sleep(0.5)
+                    st.rerun()
+        with col_v_act2:
+            with st.popover("🗑️ Delete Video", use_container_width=True):
+                st.markdown(f"**Delete `{sel_ov_vid}`?**")
+                st.caption("Permanently unregisters video and deletes all records and evidence.")
+                if st.button("Confirm Delete", type="primary", key="ov_confirm_del_btn", use_container_width=True):
+                    db.delete_video(sel_ov_vid, clear_reviews=True)
+                    delete_evidence_disk(sel_ov_vid)
+                    st.success(f"Deleted `{sel_ov_vid}`.")
+                    time.sleep(0.5)
+                    st.rerun()
+
+        with st.expander("Global Project Reset", expanded=False):
+            st.markdown(
+                '<div class="callout warning">'
+                '<b>Reset All Videos</b>: Clears all events, detections, and evidence crops across all videos, resetting statuses to pending.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            col_g1, col_g2 = st.columns([3, 1.5])
+            with col_g1:
+                g_chk = st.checkbox("Confirm project-wide reset of all video inference data", key="ov_g_chk")
+            with col_g2:
+                if st.button("Purge All Data", type="secondary", disabled=not g_chk, key="ov_g_btn", use_container_width=True):
+                    res = db.purge_all_inference_data(clear_reviews=False)
+                    f_cnt, _ = delete_evidence_disk(None)
+                    st.success(f"Purged {res['events_deleted']} events and {f_cnt} evidence files across all videos.")
+                    time.sleep(0.5)
+                    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -527,6 +624,30 @@ def page_process():
                 c1.metric("Duration", f"{meta['duration_min']:.1f} min")
                 c2.metric("Resolution", f"{meta['width']}×{meta['height']}")
 
+    # Existing data notice and management
+    if video_id_final:
+        v_stats = db.get_video_stats(video_id_final)
+        v_files, v_mb = get_evidence_disk_usage(video_id_final)
+        if v_stats["event_count"] > 0 or v_stats["status"] == "done" or v_files > 0:
+            col_not1, col_not2 = st.columns([3.5, 1.5])
+            with col_not1:
+                st.markdown(
+                    f'<div class="callout warning" style="margin: 6px 0;">'
+                    f'<b>Existing Data</b>: <code>{video_id_final}</code> is marked <b>{v_stats["status"].upper()}</b> '
+                    f'with <b>{v_stats["event_count"]}</b> events and <b>{v_files}</b> evidence files ({v_mb:.1f} MB).'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_not2:
+                with st.popover("Clear Prior Results", use_container_width=True):
+                    st.caption("Clears candidate events and evidence, resetting video to pending.")
+                    if st.button("Confirm Reset", type="primary", key=f"pre_del_btn_{video_id_final}", use_container_width=True):
+                        db.delete_video_data(video_id_final, clear_reviews=False, reset_status=True)
+                        delete_evidence_disk(video_id_final)
+                        st.success(f"Cleared existing data for `{video_id_final}`.")
+                        time.sleep(0.5)
+                        st.rerun()
+
     # ── Step 4: Settings ──
     step_header(4, "Inference settings")
 
@@ -536,12 +657,13 @@ def page_process():
             sample_fps = st.slider("Sample FPS", 1.0, 15.0, 5.0, 0.5,
                                    help="How many frames per second to extract for inference.")
         with s2:
-            conf_threshold = st.slider("Confidence threshold", 0.10, 0.90, 0.35, 0.05,
-                                       help="Minimum YOLO confidence to keep a detection.")
+            conf_threshold = st.slider("Confidence threshold", 0.01, 0.90, 0.02, 0.005,
+                                       help="Minimum YOLO confidence to keep a detection. Set to 0.015 - 0.03 for fine-tuned models like train-3.")
         with s3:
             iou_threshold = st.slider("NMS IoU threshold", 0.10, 0.90, 0.45, 0.05)
         with s4:
-            imgsz = st.selectbox("Inference size (px)", [416, 640, 960, 1280], index=1)
+            imgsz = st.selectbox("Inference size (px)", [416, 640, 960, 1280], index=3,
+                                 help="Resolution fed into YOLO. 1280px is recommended for road video pothole detection.")
 
         p1, p2, p3 = st.columns(3)
         with p1:
@@ -552,13 +674,16 @@ def page_process():
         with p3:
             verifier_threshold = st.slider("Verifier threshold (Policy C)", 0.10, 0.90, 0.50, 0.05)
 
-        opt1, opt2 = st.columns(2)
+        opt1, opt2, opt3 = st.columns(3)
         with opt1:
             preserve_reviews = st.checkbox("Preserve human review decisions on reprocessing", value=True,
                                            help="Retains existing reviews for this video when re-running pipeline.")
         with opt2:
             generate_clips = st.checkbox("Generate short evidence video clips (MP4)", value=False,
                                          help="Extracts 3-second video clips around each candidate event.")
+        with opt3:
+            clean_evidence_before = st.checkbox("Clean previous evidence folder before running", value=True,
+                                                help="Deletes existing crop images/clips from results/evidence/<video_id> to avoid obsolete files.")
 
     # ── Run ──
     st.divider()
@@ -577,6 +702,7 @@ def page_process():
             verifier_path_input.strip() or None, sample_fps, conf_threshold,
             iou_threshold, int(imgsz), road_segment_id, int(policy_b_min_obs),
             verifier_threshold, preserve_reviews=preserve_reviews, generate_clips=generate_clips,
+            clean_evidence_before=clean_evidence_before,
         )
 
 
@@ -586,6 +712,7 @@ def _run_analysis(
     iou_threshold: float, imgsz: int, road_segment_id: str,
     policy_b_min_obs: int, verifier_threshold: float,
     preserve_reviews: bool = True, generate_clips: bool = False,
+    clean_evidence_before: bool = True,
 ) -> None:
     """Full shared pipeline: sample → detect+track → group → evidence → policies → save."""
     from ultralytics import YOLO
@@ -599,6 +726,9 @@ def _run_analysis(
         status_text.markdown(f"**{msg}**")
 
     # Register / reset
+    if clean_evidence_before:
+        delete_evidence_disk(video_id)
+
     meta = get_video_metadata(str(video_path))
     meta["filepath"] = str(video_path)
     meta["road_segment_id"] = road_segment_id
@@ -710,6 +840,21 @@ def _run_analysis(
             if verifier.is_configured() else "Not configured",
         )
         st.info("Go to **Review Events** to inspect and label the candidate events.")
+
+        st.write("")
+        col_post1, col_post2 = st.columns([3, 1.2])
+        with col_post1:
+            st.info("Inference complete. Go to **Review Events** in the sidebar to inspect candidate potholes.")
+        with col_post2:
+            with st.popover("🗑️ Discard Run", use_container_width=True):
+                st.markdown(f"**Discard results for `{video_id}`?**")
+                st.caption("Removes newly generated events and evidence crops, resetting video to pending.")
+                if st.button("Confirm Discard", type="primary", key=f"post_btn_{video_id}", use_container_width=True):
+                    deleted_ev = db.delete_video_data(video_id, clear_reviews=False, reset_status=True)
+                    deleted_f, _ = delete_evidence_disk(video_id)
+                    st.success(f"Discarded {deleted_ev} events and {deleted_f} evidence files.")
+                    time.sleep(0.5)
+                    st.rerun()
 
     except Exception as exc:
         db.mark_processing_error(video_id, str(exc))
@@ -937,7 +1082,7 @@ def page_dataset():
     st.title("Dataset Management")
     db = get_db()
 
-    tab_reg, tab_crops = st.tabs(["Register Video", "Crop Export"])
+    tab_reg, tab_crops, tab_manage = st.tabs(["Register Video", "Crop Export", "Data Cleanup & Management"])
 
     with tab_reg:
         st.subheader("Register a road video")
@@ -1012,6 +1157,92 @@ def page_dataset():
                 "Download crop manifest CSV", data=buf.getvalue(),
                 file_name="crop_manifest.csv", mime="text/csv",
             )
+
+    with tab_manage:
+        st.subheader("Data Cleanup & Management")
+        st.caption("Inspect and manage inference data, evidence crops, and dataset records.")
+
+        videos = db.get_videos()
+        if not videos:
+            st.info("No videos registered yet.")
+        else:
+            # Table overview of videos and data footprints
+            v_rows = []
+            for v in videos:
+                vid = v["video_id"]
+                st_info = db.get_video_stats(vid)
+                f_count, f_mb = get_evidence_disk_usage(vid)
+                v_rows.append({
+                    "Video ID": vid,
+                    "Status": v.get("processing_status", "pending"),
+                    "Duration": f"{v.get('duration_sec', 0)/60:.1f} min" if v.get("duration_sec") else "N/A",
+                    "Events": st_info["event_count"],
+                    "Detections": st_info["detection_count"],
+                    "Reviews": st_info["review_count"],
+                    "Evidence Files": f_count,
+                    "Evidence Size": f"{f_mb:.2f} MB",
+                })
+            st.dataframe(pd.DataFrame(v_rows), use_container_width=True, hide_index=True)
+
+            st.write("")
+            st.markdown('<div class="section-title">Manage Individual Video</div>', unsafe_allow_html=True)
+            col_v1, col_v2 = st.columns([2, 1])
+            with col_v1:
+                sel_vid = st.selectbox("Select video to manage", [v["video_id"] for v in videos], key="cleanup_sel_vid")
+            with col_v2:
+                sel_action = st.radio(
+                    "Action",
+                    ["Clear inference results (keep video registered)", "Delete video and all data completely"],
+                    key="cleanup_action",
+                )
+
+            st.write("")
+            c_opt1, c_opt2 = st.columns(2)
+            with c_opt1:
+                cleanup_clr_rev = st.checkbox("Also delete human review decisions", value=False, key="cleanup_clr_rev")
+            with c_opt2:
+                cleanup_clr_disk = st.checkbox("Delete evidence files on disk", value=True, key="cleanup_clr_disk")
+
+            confirm_single = st.checkbox(f"Confirm action on `{sel_vid}`", key="cleanup_confirm_single")
+            if st.button("Execute Video Action", type="secondary", disabled=not confirm_single, key="cleanup_btn_single"):
+                if "keep video" in sel_action:
+                    n_ev = db.delete_video_data(sel_vid, clear_reviews=cleanup_clr_rev, reset_status=True)
+                    n_f = 0
+                    if cleanup_clr_disk:
+                        n_f, _ = delete_evidence_disk(sel_vid)
+                    st.success(f"Cleared inference data for `{sel_vid}`: {n_ev} events and {n_f} evidence files removed.")
+                else:
+                    db.delete_video(sel_vid, clear_reviews=cleanup_clr_rev)
+                    if cleanup_clr_disk:
+                        delete_evidence_disk(sel_vid)
+                    st.success(f"Completely deleted video `{sel_vid}` and its associated data.")
+                time.sleep(0.8)
+                st.rerun()
+
+            st.write("")
+            st.markdown('<div class="section-title">Global Project Cleanup</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="callout warning">'
+                '<b>Danger Zone</b>: This purges all candidate events, detections, and evidence files '
+                'across all videos in the project, resetting video statuses back to pending.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            g_c1, g_c2 = st.columns(2)
+            with g_c1:
+                purge_all_rev = st.checkbox("Also purge all human reviews", value=False, key="purge_all_rev")
+            with g_c2:
+                purge_all_disk = st.checkbox("Also purge all evidence files from disk", value=True, key="purge_all_disk")
+
+            confirm_global = st.checkbox("I understand this will delete all processed inference data across all videos", key="confirm_global_purge")
+            if st.button("Purge All Inference Data", type="primary", disabled=not confirm_global, key="btn_global_purge"):
+                res = db.purge_all_inference_data(clear_reviews=purge_all_rev)
+                disk_f = 0
+                if purge_all_disk:
+                    disk_f, _ = delete_evidence_disk(None)
+                st.success(f"Purge complete: {res['events_deleted']} events, {res['detections_deleted']} detections, and {disk_f} evidence files removed.")
+                time.sleep(1)
+                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
