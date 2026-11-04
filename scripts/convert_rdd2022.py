@@ -58,32 +58,42 @@ DEFAULT_COUNTRIES = [
 ]
 
 
-def parse_voc_xml(xml_path: Path, target_classes: dict[str, int]) -> tuple[int, int, list[tuple[int, float, float, float, float]]]:
-    """Parse a Pascal VOC XML file and return (width, height, list of [class_id, cx, cy, w, h])."""
+def parse_voc_xml(
+    xml_path: Path, target_classes: dict[str, int]
+) -> tuple[int, int, list[tuple[int, float, float, float, float]]] | None:
+    """Parse a Pascal VOC XML file and return (width, height, list of [class_id, cx, cy, w, h]).
+
+    Returns None if the XML is corrupt or invalid, preventing it from being silently
+    treated as a true negative road image.
+    """
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
     except Exception as exc:
-        print(f"  [WARN] Failed to parse {xml_path.name}: {exc}")
-        return 0, 0, []
+        print(f"  [ERROR] Failed to parse XML {xml_path.name}: {exc}")
+        return None
 
     size_elem = root.find("size")
     if size_elem is None:
-        return 0, 0, []
+        print(f"  [ERROR] Missing <size> element in {xml_path.name}")
+        return None
 
     w_val = size_elem.find("width")
     h_val = size_elem.find("height")
     if w_val is None or h_val is None:
-        return 0, 0, []
+        print(f"  [ERROR] Missing width/height in {xml_path.name}")
+        return None
 
     try:
         img_w = int(w_val.text.strip())
         img_h = int(h_val.text.strip())
-    except (ValueError, AttributeError):
-        return 0, 0, []
+    except (ValueError, AttributeError) as exc:
+        print(f"  [ERROR] Non-numeric width/height in {xml_path.name}: {exc}")
+        return None
 
     if img_w <= 0 or img_h <= 0:
-        return 0, 0, []
+        print(f"  [ERROR] Non-positive dimensions ({img_w}x{img_h}) in {xml_path.name}")
+        return None
 
     boxes = []
     for obj in root.findall("object"):
@@ -171,12 +181,21 @@ def discover_pairs(input_dir: Path, countries: list[str] | None = None) -> list[
 
 
 def write_yolo_yaml(yaml_path: Path, output_dir: Path, train_list: Path, val_list: Path, class_names: list[str]) -> None:
-    """Generate YOLO data configuration yaml."""
+    """Generate YOLO data configuration yaml with portable paths."""
+    try:
+        rel_train = train_list.relative_to(PROJECT_ROOT).as_posix()
+        rel_val = val_list.relative_to(PROJECT_ROOT).as_posix()
+        root_path = "."
+    except ValueError:
+        rel_train = train_list.resolve().as_posix()
+        rel_val = val_list.resolve().as_posix()
+        root_path = output_dir.resolve().as_posix()
+
     content = [
         "# YOLO Dataset Configuration - Generated from RDD2022",
-        f"path: {output_dir.resolve().as_posix()}",
-        f"train: {train_list.resolve().as_posix()}",
-        f"val: {val_list.resolve().as_posix()}",
+        f"path: {root_path}",
+        f"train: {rel_train}",
+        f"val: {rel_val}",
         "",
         "names:",
     ]
@@ -232,56 +251,96 @@ def main() -> None:
     # Process and collect stats
     total_boxes = 0
     images_with_targets = 0
+    images_without_targets = 0
+    corrupt_count = 0
     processed_items = []
 
     for img_path, xml_path, country in pairs:
-        w, h, boxes = parse_voc_xml(xml_path, target_classes)
+        parsed = parse_voc_xml(xml_path, target_classes)
+        if parsed is None:
+            corrupt_count += 1
+            continue
+        w, h, boxes = parsed
         if boxes:
             images_with_targets += 1
             total_boxes += len(boxes)
+        else:
+            images_without_targets += 1
         processed_items.append((img_path, xml_path, country, boxes))
 
     print("\n--- Summary of Discovered Data ---")
-    print(f"Total images checked:        {len(processed_items)}")
+    print(f"Total pairs scanned:         {len(pairs)}")
+    print(f"Valid images processed:      {len(processed_items)}")
+    print(f"Corrupt/invalid annotations: {corrupt_count}")
     print(f"Images with target potholes: {images_with_targets}")
+    print(f"Valid negative road images:  {images_without_targets}")
     print(f"Total target bounding boxes: {total_boxes}")
 
     if args.dry_run:
         print("\n[Dry-run completed. No files written.]")
         return
 
-    # Train / Val Split
+    # Train / Val Split grouped by sequence/prefix to prevent data leakage
+    # Consecutive views of the same road segment must remain in the same split.
     random.seed(args.seed)
-    random.shuffle(processed_items)
+    seq_groups: dict[str, list] = {}
+    for item in processed_items:
+        img_p = item[0]
+        # Use filename prefix (e.g. United_States_001 or Japan_000001) as sequence/group key
+        parts = img_p.stem.split("_")
+        seq_key = "_".join(parts[:-1]) if len(parts) > 1 else item[2]
+        seq_groups.setdefault(seq_key, []).append(item)
 
-    val_count = int(len(processed_items) * args.val_split)
-    val_items = processed_items[:val_count]
-    train_items = processed_items[val_count:]
+    seq_keys = sorted(seq_groups.keys())
+    random.shuffle(seq_keys)
+
+    val_target = int(len(processed_items) * args.val_split)
+    val_items = []
+    train_items = []
+
+    for k in seq_keys:
+        items = seq_groups[k]
+        if len(val_items) < val_target:
+            val_items.extend(items)
+        else:
+            train_items.extend(items)
 
     out_dir = args.output.resolve()
-    labels_train_dir = out_dir / "labels" / "train"
-    labels_val_dir = out_dir / "labels" / "val"
-    labels_train_dir.mkdir(parents=True, exist_ok=True)
-    labels_val_dir.mkdir(parents=True, exist_ok=True)
+
+    def export_split(items, split_name: str, img_path_list: list[str]):
+        labels_dir = out_dir / "labels" / split_name
+        images_dir = out_dir / "images" / split_name
+        labels_dir.mkdir(parents=True, exist_ok=True)
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        for img_path, xml_path, country, boxes in items:
+            lbl_file = labels_dir / f"{img_path.stem}.txt"
+            lines = [f"{b[0]} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f} {b[4]:.6f}" for b in boxes]
+            lbl_file.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+            # Link or copy image into images/split/ so Ultralytics standard label mapping succeeds
+            target_img = images_dir / img_path.name
+            if not target_img.exists() and not target_img.is_symlink():
+                try:
+                    rel_src = os.path.relpath(img_path, images_dir)
+                    os.symlink(rel_src, target_img)
+                except OSError:
+                    import shutil
+                    shutil.copy2(img_path, target_img)
+
+            img_path_list.append(target_img.resolve().as_posix())
 
     train_img_paths: list[str] = []
     val_img_paths: list[str] = []
 
-    def export_split(items, labels_dir, img_path_list):
-        for img_path, xml_path, country, boxes in items:
-            lbl_file = labels_dir / f"{img_path.stem}.txt"
-            lines = [f"{b[0]} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f} {b[4]:.6f}" for b in boxes]
-            lbl_file.write_text("\n".join(lines), encoding="utf-8")
-            img_path_list.append(img_path.resolve().as_posix())
-
-    print("\nWriting YOLO label files...")
-    export_split(train_items, labels_train_dir, train_img_paths)
-    export_split(val_items, labels_val_dir, val_img_paths)
+    print("\nWriting YOLO images and labels...")
+    export_split(train_items, "train", train_img_paths)
+    export_split(val_items, "val", val_img_paths)
 
     train_txt = out_dir / "train.txt"
     val_txt = out_dir / "val.txt"
-    train_txt.write_text("\n".join(train_img_paths), encoding="utf-8")
-    val_txt.write_text("\n".join(val_img_paths), encoding="utf-8")
+    train_txt.write_text("\n".join(train_img_paths) + "\n", encoding="utf-8")
+    val_txt.write_text("\n".join(val_img_paths) + "\n", encoding="utf-8")
 
     # Generate configs/detector.yaml
     config_yaml = PROJECT_ROOT / "configs" / "detector.yaml"

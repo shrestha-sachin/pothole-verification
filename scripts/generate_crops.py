@@ -42,6 +42,10 @@ except ImportError:
     sys.exit("ERROR: Pillow is required.  Run: .venv/bin/pip install Pillow")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.verifier.preprocessing import DEFAULT_PAD_FRAC, expand_and_clamp_box
 ANNOTATIONS_ROOT = PROJECT_ROOT / "data" / "annotations"
 INVENTORY_PATH = PROJECT_ROOT / "data" / "metadata" / "image_inventory.csv"
 CROPS_ROOT = PROJECT_ROOT / "data" / "processed" / "verifier_crops"
@@ -98,8 +102,9 @@ def crop_and_save(
     context_px: int,
     out_path: Path,
     overwrite: bool,
+    pad_frac: float = DEFAULT_PAD_FRAC,
 ) -> tuple[int, int, int, int, int, int] | None:
-    """Cut a crop with context from img.  Returns (x1,y1,x2,y2,w,h) or None on error."""
+    """Cut a crop with 15% context from img.  Returns (x1,y1,x2,y2,w,h) or None on error."""
     try:
         bx = int(box["x"])
         by = int(box["y"])
@@ -114,10 +119,7 @@ def crop_and_save(
         return None
 
     img_w, img_h = img.size
-    x1 = max(0, bx - context_px)
-    y1 = max(0, by - context_px)
-    x2 = min(img_w, bx + bw + context_px)
-    y2 = min(img_h, by + bh + context_px)
+    x1, y1, x2, y2 = expand_and_clamp_box(bx, by, bx + bw, by + bh, img_w, img_h, pad_frac=pad_frac)
 
     if x2 <= x1 or y2 <= y1:
         print(f"    SKIP degenerate crop region: ({x1},{y1},{x2},{y2})")

@@ -32,15 +32,54 @@ class PolicyConfig:
     # Policy A
     conf_threshold: float = 0.35
 
-    # Policy B
+    # Policy B: at least min_obs observations within a sliding window of temporal_window_frames
     min_obs: int = 2
-    max_frame_span: int = 5          # max frames between first and last obs
+    temporal_window_frames: int = 5   # sliding window size (5 sampled frames)
 
     # Policy C
-    verifier_threshold: float = 0.5  # NOT selected from test data
+    verifier_threshold: float = 0.5   # NOT selected from test data
 
-    # Policy C requires Policy B?  (per spec: No)
+    # Policy C requires Policy B?  (per spec: No, C is independent of B by default)
     policy_c_requires_policy_b: bool = False
+
+
+def check_temporal_window(
+    observations: list,
+    min_obs: int = 2,
+    window_size_frames: int = 5,
+    conf_threshold: float = 0.0,
+) -> bool:
+    """Check if at least min_obs actual detector observations occur within any sliding window of window_size_frames.
+
+    Frame indices are sequential sampled frame counters: 0, 1, 2, ...
+    A sliding window of size W frames spans indices [k, k + W - 1], so the maximum difference
+    between two observation indices in the same window is (W - 1).
+    For W = 5, max allowed difference between any two observations in the window is 4.
+    """
+    if not observations or min_obs < 1:
+        return False
+
+    indices = []
+    for obs in observations:
+        c = getattr(obs, "conf", None) if not isinstance(obs, dict) else obs.get("conf")
+        if c is not None and c < conf_threshold:
+            continue
+        fi = getattr(obs, "frame_index", None) if not isinstance(obs, dict) else obs.get("frame_index")
+        if fi is not None:
+            indices.append(int(fi))
+
+    if len(indices) < min_obs:
+        return False
+
+    indices = sorted(set(indices))
+    if len(indices) < min_obs:
+        return False
+
+    max_gap = window_size_frames - 1
+    for i in range(len(indices) - min_obs + 1):
+        if (indices[i + min_obs - 1] - indices[i]) <= max_gap:
+            return True
+    return False
 
 
 def apply_policies(
@@ -60,21 +99,30 @@ def apply_policies(
     cfg = config or PolicyConfig()
 
     for ev in events:
-        # Policy A
-        ev.policy_a_retained = ev.detector_conf_max >= cfg.conf_threshold
+        # Policy A: detector confidence threshold + shared grouping
+        max_conf = getattr(ev, "detector_conf_max", 0.0) or 0.0
+        ev.policy_a_retained = bool(max_conf >= cfg.conf_threshold)
 
-        # Policy B
-        frame_span = ev.last_frame_index - ev.first_frame_index
-        ev.policy_b_retained = (
-            ev.observation_count >= cfg.min_obs
+        # Policy B: Policy A AND at least min_obs actual observations within sliding window
+        obs_list = getattr(ev, "observations", []) or []
+        temporal_pass = check_temporal_window(
+            obs_list,
+            min_obs=cfg.min_obs,
+            window_size_frames=cfg.temporal_window_frames,
+            conf_threshold=cfg.conf_threshold,
         )
+        ev.policy_b_retained = bool(ev.policy_a_retained and temporal_pass)
 
-        # Policy C — only update retained flag if score exists
+        # Policy C: Policy A AND MobileNetV3-Small score above verifier_threshold.
+        # Per specification: Policy C must NOT require Policy B unless explicitly configured.
         if ev.policy_c_score is not None:
-            ev.policy_c_retained = ev.policy_c_score >= cfg.verifier_threshold
+            c_pass = ev.policy_c_score >= cfg.verifier_threshold
             if cfg.policy_c_requires_policy_b:
-                ev.policy_c_retained = ev.policy_c_retained and ev.policy_b_retained
+                ev.policy_c_retained = bool(ev.policy_a_retained and ev.policy_b_retained and c_pass)
+            else:
+                ev.policy_c_retained = bool(ev.policy_a_retained and c_pass)
         else:
+            # Policy C unavailable when no valid checkpoint exists; never fabricate scores
             ev.policy_c_retained = None
 
     return events
@@ -106,100 +154,59 @@ def summarize_policies(events: list, config: Optional[PolicyConfig] = None) -> d
 
 
 # ---------------------------------------------------------------------------
-# Ground-truth matching (stub — requires external annotations)
+# Ground-truth matching
 # ---------------------------------------------------------------------------
+
+from src.evaluation.matcher import (
+    GroundTruthAnnotation,
+    EvaluationMetrics,
+    evaluate_event_detections,
+    run_sensitivity_analysis,
+    box_iou,
+)
+
 
 def match_events_to_ground_truth(
     predicted_events: list,
     ground_truth_boxes: list[dict],
+    video_duration_min: float = 1.0,
     iou_threshold: float = 0.5,
+    temporal_tolerance_ms: int = 1500,
 ) -> dict:
     """
-    One-to-one event matching using IoU >= iou_threshold.
+    One-to-one event matching using physical event IDs, temporal alignment, and IoU.
 
     Parameters
     ----------
     predicted_events : list of CandidateEvent
-    ground_truth_boxes : list of dicts with keys:
-        {timestamp_ms, x1, y1, x2, y2, label}  # label: pothole | non_pothole
+    ground_truth_boxes : list of dicts or GroundTruthAnnotation
+    video_duration_min : video duration in minutes for false alarm rate calculation
     iou_threshold : default 0.5; use 0.3 for sensitivity analysis
+    temporal_tolerance_ms : timestamp tolerance in ms for observation alignment
 
     Returns
     -------
-    dict with keys: tp, fp, fn, matched_pairs, unmatched_pred, unmatched_gt
-
-    NOTE: This function is a stub.  It computes correct IoU matching logic
-    but should only be called when ground-truth annotations are available.
-    Calling it on development/validation data for threshold selection
-    would constitute test-set leakage.
+    dict with keys: tp, fp, fn, duplicate_reports, recall, precision,
+                    false_reports_per_minute, lookalike_breakdown, matched_pairs
     """
-    import warnings
-    warnings.warn(
-        "match_events_to_ground_truth requires independent ground-truth annotations. "
-        "Do not use validation or test footage for threshold selection.",
-        UserWarning,
-        stacklevel=2,
+    metrics = evaluate_event_detections(
+        predicted_events=predicted_events,
+        ground_truth_annotations=ground_truth_boxes,
+        video_duration_min=video_duration_min,
+        iou_threshold=iou_threshold,
+        temporal_tolerance_ms=temporal_tolerance_ms,
     )
-
-    matched_pred: set[str] = set()
-    matched_gt: set[int] = set()
-    matched_pairs: list = []
-
-    for ev in predicted_events:
-        best_iou = 0.0
-        best_gt_idx = -1
-        for gi, gt in enumerate(ground_truth_boxes):
-            if gi in matched_gt:
-                continue
-            iou = _box_iou(
-                (ev.rep_x1, ev.rep_y1, ev.rep_x2, ev.rep_y2),
-                (gt["x1"], gt["y1"], gt["x2"], gt["y2"]),
-            )
-            if iou > best_iou:
-                best_iou = iou
-                best_gt_idx = gi
-        if best_iou >= iou_threshold and best_gt_idx >= 0:
-            matched_pred.add(ev.event_id)
-            matched_gt.add(best_gt_idx)
-            matched_pairs.append({
-                "event_id": ev.event_id,
-                "gt_index": best_gt_idx,
-                "iou": best_iou,
-            })
-
-    tp = len(matched_pairs)
-    fp = len(predicted_events) - tp
-    fn = len(ground_truth_boxes) - tp
-
     return {
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "matched_pairs": matched_pairs,
-        "unmatched_pred": [
-            ev.event_id for ev in predicted_events
-            if ev.event_id not in matched_pred
-        ],
-        "unmatched_gt": [
-            gi for gi in range(len(ground_truth_boxes))
-            if gi not in matched_gt
-        ],
+        "tp": metrics.true_positives,
+        "fp": metrics.false_positives,
+        "fn": metrics.missed_potholes,
+        "duplicate_reports": metrics.duplicate_reports,
+        "recall": metrics.event_recall,
+        "precision": metrics.report_precision,
+        "false_reports_per_minute": metrics.false_reports_per_minute,
+        "lookalike_breakdown": metrics.lookalike_breakdown,
+        "matched_pairs": metrics.matched_pairs,
+        "duplicate_pairs": metrics.duplicate_pairs,
+        "unmatched_gt_ids": metrics.unmatched_gt_ids,
+        "metrics_object": metrics,
     }
-
-
-def _box_iou(
-    a: tuple[int, int, int, int],
-    b: tuple[int, int, int, int],
-) -> float:
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
-    inter = iw * ih
-    if inter == 0:
-        return 0.0
-    area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
-    area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0

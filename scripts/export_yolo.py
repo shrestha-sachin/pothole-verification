@@ -186,7 +186,9 @@ def export(output_dir: Path) -> None:
                 os.symlink(rel_target, link_target)
                 linked_img_path = rel(link_target)
             except OSError:
-                linked_img_path = rel(src_path)
+                import shutil
+                shutil.copy2(src_path, link_target)
+                linked_img_path = rel(link_target)
 
         if yolo_lines:
             exported_pos += 1

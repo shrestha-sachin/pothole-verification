@@ -402,13 +402,31 @@ def page_process():
         )
     with col_minfo:
         mp = Path(model_path_input.strip()) if model_path_input.strip() else None
+        model_valid = False
         if mp and mp.exists():
             st.metric("Checkpoint", f"{mp.stat().st_size / (1024*1024):.1f} MB")
-            st.success(f"`{mp.name}` found")
+            try:
+                import torch
+                ckpt = torch.load(str(mp), map_location="cpu", weights_only=False)
+                names = getattr(ckpt.get("model"), "names", None) if isinstance(ckpt, dict) else None
+                if names is None and isinstance(ckpt, dict):
+                    names = ckpt.get("names")
+                if names and isinstance(names, dict):
+                    cls0 = names.get(0, "")
+                    if "pothole" in str(cls0).lower():
+                        st.success(f"`{mp.name}`: class 0 is '{cls0}' ✓")
+                        model_valid = True
+                    else:
+                        st.error(f"`{mp.name}`: class 0 is '{cls0}' (not 'pothole'). Please select a fine-tuned pothole detector (e.g. models/best.pt).")
+                        model_valid = False
+                else:
+                    st.success(f"`{mp.name}` found")
+                    model_valid = True
+            except Exception:
+                st.success(f"`{mp.name}` found")
+                model_valid = True
         elif model_path_input.strip():
             st.error("File not found")
-
-    model_valid = mp is not None and mp.exists() if mp else False
 
     # ── Step 2: Verifier ──
     step_header(2, "Verifier checkpoint (optional)")
@@ -512,6 +530,14 @@ def page_process():
         with p3:
             verifier_threshold = st.slider("Verifier threshold (Policy C)", 0.10, 0.90, 0.50, 0.05)
 
+        opt1, opt2 = st.columns(2)
+        with opt1:
+            preserve_reviews = st.checkbox("Preserve human review decisions on reprocessing", value=True,
+                                           help="Retains existing reviews for this video when re-running pipeline.")
+        with opt2:
+            generate_clips = st.checkbox("Generate short evidence video clips (MP4)", value=False,
+                                         help="Extracts 3-second video clips around each candidate event.")
+
     # ── Run ──
     st.divider()
     can_run = model_valid and video_path_final is not None
@@ -525,7 +551,7 @@ def page_process():
             db, video_path_final, video_id_final, Path(model_path_input.strip()),
             verifier_path_input.strip() or None, sample_fps, conf_threshold,
             iou_threshold, int(imgsz), road_segment_id, int(policy_b_min_obs),
-            verifier_threshold,
+            verifier_threshold, preserve_reviews=preserve_reviews, generate_clips=generate_clips,
         )
 
 
@@ -534,8 +560,9 @@ def _run_analysis(
     verifier_path: str | None, sample_fps: float, conf_threshold: float,
     iou_threshold: float, imgsz: int, road_segment_id: str,
     policy_b_min_obs: int, verifier_threshold: float,
+    preserve_reviews: bool = True, generate_clips: bool = False,
 ) -> None:
-    """Full pipeline: sample → detect+track → group → evidence → policies → save."""
+    """Full shared pipeline: sample → detect+track → group → evidence → policies → save."""
     from ultralytics import YOLO
 
     status_text = st.empty()
@@ -546,15 +573,12 @@ def _run_analysis(
         progress.progress(min(1.0, pct))
         status_text.markdown(f"**{msg}**")
 
-    def log(msg: str):
-        detail.info(msg)
-
     # Register / reset
     meta = get_video_metadata(str(video_path))
     meta["filepath"] = str(video_path)
     meta["road_segment_id"] = road_segment_id
     db.register_video(video_id, meta)
-    db.delete_events_for_video(video_id)
+    preserved_reviews = db.delete_events_for_video(video_id, clear_reviews=not preserve_reviews)
     db.mark_processing_started(video_id, {
         "sample_fps": sample_fps, "model_path": str(model_path),
         "detector_conf": conf_threshold, "detector_iou": iou_threshold,
@@ -563,143 +587,52 @@ def _run_analysis(
     try:
         t0 = time.time()
 
-        # 1. Load model
-        step(0.03, "Loading YOLO model weights...")
+        # 1. Load model and validate checkpoint
+        step(0.04, "Loading YOLO model weights...")
         model = YOLO(str(model_path))
         device = auto_device()
-        log(f"Model `{model_path.name}` loaded on {device.upper()}")
 
-        # 2. Sample frames
-        step(0.06, "Sampling video frames at target frequency...")
-        total_sec = meta.get("duration_sec", 0)
-        expected = max(1, int(total_sec * sample_fps))
-        frames: list[tuple[int, int, np.ndarray]] = []
-        for fi, ts_ms, bgr in iter_frames(str(video_path), target_fps=sample_fps):
-            frames.append((fi, ts_ms, bgr))
-            pct = 0.06 + 0.24 * min(1.0, fi / expected)
-            step(pct, f"Sampling frame {fi+1} of ~{expected}...")
-
-        n_frames = len(frames)
-        log(f"Sampled {n_frames} frames at {sample_fps} FPS")
-        step(0.30, f"{n_frames} frames sampled. Running detection and tracking...")
-
-        # 3. Detection + BoT-SORT tracking
         grouper = EventGrouper(
-            video_id=video_id, road_segment_id=road_segment_id,
+            video_id=video_id,
+            road_segment_id=road_segment_id,
             policy_b_min_obs=policy_b_min_obs,
+            policy_b_window_frames=5,
         )
-        cfg_path = grouper._write_tracker_config()
-        model.predictor = None  # reset tracker state
+        grouper.validate_checkpoint(model)
+        detail.info(f"Model `{model_path.name}` verified and loaded on {device.upper()}")
 
-        track_obs: dict[int, list[ObservedDetection]] = {}
-        track_evidence: dict[int, list] = {}
+        # 2. Process video stream incrementally with bounded memory
+        total_sec = meta.get("duration_sec", 0) or 0
+        expected = max(1, int(total_sec * sample_fps))
+        step(0.12, f"Streaming {total_sec:.1f}s video at {sample_fps} FPS (bounded memory)...")
 
-        for i, (fi, ts_ms, bgr) in enumerate(frames):
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            results = model.track(
-                rgb, conf=conf_threshold, iou=iou_threshold, imgsz=imgsz,
-                device=device, tracker=cfg_path, persist=True, verbose=False,
-            )
-            for r in results:
-                if r.boxes is None or r.boxes.id is None:
-                    continue
-                for box in r.boxes:
-                    if int(box.cls[0].item()) != 0:
-                        continue
-                    bconf = float(box.conf[0].item())
-                    tid = int(box.id[0].item())
-                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+        def on_progress(fi, total):
+            pct = 0.12 + 0.68 * min(1.0, fi / expected)
+            step(pct, f"Detecting and tracking frame {fi} of ~{expected}...")
 
-                    if bconf >= conf_threshold:
-                        crop = bgr[max(0, y1):max(1, y2), max(0, x1):max(1, x2)]
-                        if crop.size > 0:
-                            lap = float(cv2.Laplacian(
-                                cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F
-                            ).var())
-                        else:
-                            lap = 0.0
+        frame_iter = iter_frames(str(video_path), target_fps=sample_fps)
 
-                        obs = ObservedDetection(
-                            frame_index=fi, timestamp_ms=ts_ms,
-                            x1=x1, y1=y1, x2=x2, y2=y2, conf=bconf, laplacian_var=lap,
-                        )
-                        track_obs.setdefault(tid, []).append(obs)
+        events = grouper.process_video_stream(
+            frame_iter=frame_iter,
+            model=model,
+            conf=conf_threshold,
+            iou=iou_threshold,
+            imgsz=imgsz,
+            device=device,
+            evidence_root=EVIDENCE_ROOT,
+            video_path=video_path,
+            generate_clips=generate_clips,
+            total_expected_frames=expected,
+            progress_callback=on_progress,
+        )
 
-                        ev_list = track_evidence.setdefault(tid, [])
-                        ev_list.append((bconf, lap, bgr.copy(), x1, y1, x2, y2))
-                        ev_list.sort(key=lambda t: (-t[1], -t[0]))
-                        if len(ev_list) > 3:
-                            ev_list.pop()
+        n_events = len(events)
+        detail.info(f"Grouped into **{n_events}** candidate events using BoT-SORT.")
 
-            pct = 0.30 + 0.50 * ((i + 1) / n_frames)
-            step(pct, f"Detecting and tracking frame {i+1} of {n_frames}...")
-
-        # 4. Build CandidateEvents
-        step(0.82, "Aggregating candidate events...")
-        tracker_cfg = grouper._tracker_config_snapshot()
-        events: list[CandidateEvent] = []
-        frame_lookup = {fi: bgr for fi, _, bgr in frames}
-
-        for tid, obs_list in track_obs.items():
-            obs_list.sort(key=lambda o: o.timestamp_ms)
-            confs = [o.conf for o in obs_list]
-            ev = CandidateEvent(
-                event_id=str(_uuid.uuid4())[:8],
-                video_id=video_id, road_segment_id=road_segment_id,
-                track_id=tid,
-                first_timestamp_ms=obs_list[0].timestamp_ms,
-                last_timestamp_ms=obs_list[-1].timestamp_ms,
-                first_frame_index=obs_list[0].frame_index,
-                last_frame_index=obs_list[-1].frame_index,
-                detector_conf_max=max(confs),
-                detector_conf_mean=float(np.mean(confs)),
-                observation_count=len(obs_list),
-                rep_x1=obs_list[0].x1, rep_y1=obs_list[0].y1,
-                rep_x2=obs_list[0].x2, rep_y2=obs_list[0].y2,
-                observations=obs_list, tracker_config=tracker_cfg,
-            )
-            events.append(ev)
-
-        log(f"Grouped into **{len(events)}** candidate events from {len(track_obs)} tracks")
-
-        # 5. Evidence extraction
-        step(0.86, "Extracting evidence images and crops...")
-        for ev in events:
-            ev_dir = EVIDENCE_ROOT / ev.video_id / ev.event_id
-            ev_dir.mkdir(parents=True, exist_ok=True)
-            best = max(ev.observations, key=lambda o: (o.laplacian_var, o.conf))
-            bgr = frame_lookup.get(best.frame_index)
-            if bgr is None:
-                continue
-
-            # Full frame with bounding box
-            annotated = bgr.copy()
-            cv2.rectangle(annotated, (best.x1, best.y1), (best.x2, best.y2), (0, 200, 80), 3)
-            lbl = f"pothole {best.conf:.2f}"
-            (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-            cv2.rectangle(annotated, (best.x1, max(0, best.y1 - th - 12)),
-                          (best.x1 + tw + 8, best.y1), (0, 200, 80), -1)
-            cv2.putText(annotated, lbl, (best.x1 + 4, max(0, best.y1 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-            full_p = ev_dir / "full_frame.jpg"
-            cv2.imwrite(str(full_p), annotated, [cv2.IMWRITE_JPEG_QUALITY, 88])
-            ev.full_frame_path = str(full_p)
-
-            # Padded crop (15%)
-            hf, wf = bgr.shape[:2]
-            bw, bh = best.x2 - best.x1, best.y2 - best.y1
-            px, py = max(10, int(bw * 0.15)), max(10, int(bh * 0.15))
-            cx1, cy1 = max(0, best.x1 - px), max(0, best.y1 - py)
-            cx2, cy2 = min(wf, best.x2 + px), min(hf, best.y2 + py)
-            crop_p = ev_dir / "crop.jpg"
-            cv2.imwrite(str(crop_p), bgr[cy1:cy2, cx1:cx2], [cv2.IMWRITE_JPEG_QUALITY, 90])
-            ev.crop_path = str(crop_p)
-            ev.rep_x1, ev.rep_y1, ev.rep_x2, ev.rep_y2 = best.x1, best.y1, best.x2, best.y2
-
-        # 6. Verifier
+        # 3. Secondary MobileNetV3 verifier (Policy C)
         verifier = load_verifier(verifier_path, threshold=verifier_threshold)
         if verifier.is_configured():
-            step(0.89, "Evaluating secondary MobileNetV3 verifier...")
+            step(0.85, "Evaluating secondary MobileNetV3 verifier...")
             for ev in events:
                 if ev.crop_path and Path(ev.crop_path).exists():
                     cbgr = cv2.imread(ev.crop_path)
@@ -707,29 +640,39 @@ def _run_analysis(
                         res = verifier.score_crop(cbgr)
                         ev.policy_c_score = res.pothole_score
                         ev.policy_c_retained = res.is_pothole
+        else:
+            for ev in events:
+                ev.policy_c_score = None
+                ev.policy_c_retained = None
 
-        # 7. Apply policies
-        step(0.93, "Evaluating reporting suppression policies...")
+        # 4. Apply reporting policies
+        step(0.92, "Evaluating reporting suppression policies...")
         pcfg = PolicyConfig(
-            conf_threshold=conf_threshold, min_obs=policy_b_min_obs,
+            conf_threshold=conf_threshold,
+            min_obs=policy_b_min_obs,
+            temporal_window_frames=5,
             verifier_threshold=verifier_threshold,
+            policy_c_requires_policy_b=False,
         )
         apply_policies(events, pcfg)
 
-        # 8. Save
-        step(0.96, "Persisting events to database...")
+        # 5. Persist to database and re-attach preserved reviews
+        step(0.96, "Persisting events and metadata to SQLite database...")
         db.save_events(events)
-        db.mark_processing_done(video_id, n_frames)
+        if preserved_reviews:
+            reattached = db.reattach_preserved_reviews(video_id, preserved_reviews)
+            if reattached:
+                detail.info(f"Re-attached {reattached} existing human review decisions.")
+        db.mark_processing_done(video_id, expected)
 
         elapsed = time.time() - t0
         step(1.0, "Analysis complete.")
         progress.empty()
         status_text.empty()
-        detail.empty()
 
         st.success(
             f"Execution finished in {elapsed:.1f}s. Generated {len(events)} candidate events "
-            f"from {n_frames} sampled frames."
+            f"from sampled video frames."
         )
 
         summary = summarize_policies(events, pcfg)
@@ -768,6 +711,7 @@ def page_events():
 
         policy_filter = st.selectbox("Policy filter", [
             "All candidates", "Policy A retained", "Policy B retained",
+            "Policy C retained", "Filtered by Policy A", "Filtered by Policy B",
         ])
         review_filter = st.selectbox("Review status", [
             "All", "Unreviewed", "Confirmed", "Rejected", "Uncertain",
@@ -786,6 +730,12 @@ def page_events():
         events = [e for e in events if e.get("policy_a_retained")]
     elif policy_filter == "Policy B retained":
         events = [e for e in events if e.get("policy_b_retained")]
+    elif policy_filter == "Policy C retained":
+        events = [e for e in events if e.get("policy_c_retained")]
+    elif policy_filter == "Filtered by Policy A":
+        events = [e for e in events if not e.get("policy_a_retained")]
+    elif policy_filter == "Filtered by Policy B":
+        events = [e for e in events if not e.get("policy_b_retained")]
 
     if review_filter != "All":
         target = review_filter.lower()

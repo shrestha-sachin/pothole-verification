@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS events (
     rep_y1              INTEGER,
     rep_x2              INTEGER,
     rep_y2              INTEGER,
+    rep_timestamp_ms    INTEGER,
+    rep_frame_index     INTEGER,
     full_frame_path     TEXT,
     crop_path           TEXT,
     clip_path           TEXT,
@@ -129,6 +131,12 @@ class Database:
     def _init_schema(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SCHEMA_SQL)
+            # Add columns if migrating from earlier schema
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+            if "rep_timestamp_ms" not in cols:
+                conn.execute("ALTER TABLE events ADD COLUMN rep_timestamp_ms INTEGER")
+            if "rep_frame_index" not in cols:
+                conn.execute("ALTER TABLE events ADD COLUMN rep_frame_index INTEGER")
 
     @contextmanager
     def _conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -235,10 +243,10 @@ class Database:
 
     def save_events(self, events: list) -> None:
         """Insert or replace CandidateEvent objects."""
-        from src.tracking.event_grouper import CandidateEvent
-
         with self._conn() as conn:
             for ev in events:
+                rep_ts = getattr(ev, "rep_timestamp_ms", ev.first_timestamp_ms)
+                rep_fi = getattr(ev, "rep_frame_index", ev.first_frame_index)
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO events
@@ -246,7 +254,7 @@ class Database:
                        first_timestamp_ms, last_timestamp_ms,
                        first_frame_index, last_frame_index, duration_ms,
                        observation_count, detector_conf_max, detector_conf_mean,
-                       rep_x1, rep_y1, rep_x2, rep_y2,
+                       rep_x1, rep_y1, rep_x2, rep_y2, rep_timestamp_ms, rep_frame_index,
                        full_frame_path, crop_path, clip_path,
                        tracker_config, policy_a_retained, policy_b_retained,
                        policy_c_score, policy_c_retained, created_at)
@@ -255,7 +263,7 @@ class Database:
                        :first_timestamp_ms, :last_timestamp_ms,
                        :first_frame_index, :last_frame_index, :duration_ms,
                        :observation_count, :detector_conf_max, :detector_conf_mean,
-                       :rep_x1, :rep_y1, :rep_x2, :rep_y2,
+                       :rep_x1, :rep_y1, :rep_x2, :rep_y2, :rep_timestamp_ms, :rep_frame_index,
                        :full_frame_path, :crop_path, :clip_path,
                        :tracker_config, :policy_a_retained, :policy_b_retained,
                        :policy_c_score, :policy_c_retained, :created_at)
@@ -277,6 +285,8 @@ class Database:
                         "rep_y1": ev.rep_y1,
                         "rep_x2": ev.rep_x2,
                         "rep_y2": ev.rep_y2,
+                        "rep_timestamp_ms": rep_ts,
+                        "rep_frame_index": rep_fi,
                         "full_frame_path": ev.full_frame_path,
                         "crop_path": ev.crop_path,
                         "clip_path": ev.clip_path,
@@ -292,7 +302,7 @@ class Database:
                     },
                 )
                 # Save individual observations
-                for obs in ev.observations:
+                for obs in getattr(ev, "observations", []):
                     conn.execute(
                         """
                         INSERT INTO detections
@@ -455,21 +465,24 @@ class Database:
     # ------------------------------------------------------------------
 
     def export_events_csv(self, video_id: Optional[str] = None) -> str:
-        """Return a CSV string of all events with review decisions."""
+        """Return a CSV string of all events with review decisions and model metadata."""
         import io, csv
 
         events = self.get_events(video_id=video_id, include_reviews=True)
+        videos_meta = {v["video_id"]: v for v in self.get_videos()}
 
         fields = [
-            "event_id", "video_id", "road_segment_id",
+            "event_id", "video_id", "road_segment_id", "track_id",
             "first_timestamp_ms", "last_timestamp_ms", "duration_ms",
+            "first_frame_index", "last_frame_index",
             "observation_count", "detector_conf_max", "detector_conf_mean",
             "rep_x1", "rep_y1", "rep_x2", "rep_y2",
+            "rep_timestamp_ms", "rep_frame_index",
             "policy_a_retained", "policy_b_retained",
             "policy_c_score", "policy_c_retained",
             "full_frame_path", "crop_path", "clip_path",
-            "review_decision", "fp_category", "reviewer_notes",
-            "model_version",
+            "review_decision", "fp_category", "reviewer_notes", "reviewed_at",
+            "model_path", "model_version", "sample_fps", "detector_conf", "created_at",
         ]
 
         buf = io.StringIO()
@@ -478,19 +491,29 @@ class Database:
 
         for ev in events:
             review = ev.get("review") or {}
+            vmeta = videos_meta.get(ev.get("video_id", ""), {})
             row = {
                 **ev,
-                "review_decision": review.get("decision", ""),
+                "review_decision": review.get("decision", "unreviewed"),
                 "fp_category": review.get("fp_category", ""),
                 "reviewer_notes": review.get("reviewer_notes", ""),
-                "model_version": "",
+                "reviewed_at": review.get("reviewed_at", ""),
+                "model_path": vmeta.get("model_path", ""),
+                "model_version": vmeta.get("model_version", ""),
+                "sample_fps": vmeta.get("sample_fps", ""),
+                "detector_conf": vmeta.get("detector_conf", ""),
             }
             writer.writerow(row)
 
         return buf.getvalue()
 
-    def delete_events_for_video(self, video_id: str) -> None:
-        """Remove all events (and their detections/reviews) for a video."""
+    def delete_events_for_video(self, video_id: str, clear_reviews: bool = False) -> list[dict]:
+        """Remove all events (and their detections/reviews) for a video.
+
+        If clear_reviews is False, returns list of preserved review dictionaries
+        so human review decisions can be matched and carried over to new events.
+        """
+        preserved_reviews = []
         with self._conn() as conn:
             event_ids = [
                 r[0] for r in conn.execute(
@@ -498,6 +521,20 @@ class Database:
                 ).fetchall()
             ]
             if event_ids:
+                if not clear_reviews:
+                    rev_rows = conn.execute(
+                        f"""
+                        SELECT r.decision, r.fp_category, r.reviewer_notes, r.reviewed_at,
+                               e.first_timestamp_ms, e.last_timestamp_ms,
+                               e.rep_x1, e.rep_y1, e.rep_x2, e.rep_y2
+                        FROM reviews r
+                        JOIN events e ON r.event_id = e.event_id
+                        WHERE e.video_id = ?
+                        """,
+                        (video_id,),
+                    ).fetchall()
+                    preserved_reviews = [dict(r) for r in rev_rows]
+
                 placeholders = ",".join("?" * len(event_ids))
                 conn.execute(
                     f"DELETE FROM reviews WHERE event_id IN ({placeholders})", event_ids
@@ -506,3 +543,30 @@ class Database:
                     f"DELETE FROM detections WHERE event_id IN ({placeholders})", event_ids
                 )
             conn.execute("DELETE FROM events WHERE video_id = ?", (video_id,))
+        return preserved_reviews
+
+    def reattach_preserved_reviews(self, video_id: str, preserved_reviews: list[dict], time_tolerance_ms: int = 2000) -> int:
+        """Re-attach preserved human review decisions to newly generated events."""
+        if not preserved_reviews:
+            return 0
+        reattached = 0
+        new_events = self.get_events(video_id=video_id, include_reviews=False)
+        for rev in preserved_reviews:
+            r_ts = rev.get("first_timestamp_ms", 0)
+            # Find best matching event within time_tolerance_ms
+            best_ev = None
+            best_diff = float("inf")
+            for ev in new_events:
+                diff = abs(ev["first_timestamp_ms"] - r_ts)
+                if diff <= time_tolerance_ms and diff < best_diff:
+                    best_diff = diff
+                    best_ev = ev
+            if best_ev is not None:
+                self.save_review(
+                    event_id=best_ev["event_id"],
+                    decision=rev["decision"],
+                    fp_category=rev.get("fp_category"),
+                    notes=rev.get("reviewer_notes", ""),
+                )
+                reattached += 1
+        return reattached

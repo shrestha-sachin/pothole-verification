@@ -1,3 +1,4 @@
+
 """YOLO pothole detector — load once, reuse for every frame.
 
 Usage::
@@ -96,6 +97,9 @@ class PotholeDetector:
         logger.info("Loading YOLO model from %s on device=%s", self.model_path, self.device)
         self.model = YOLO(str(self.model_path))
 
+        # Checkpoint compatibility check
+        self._validate_checkpoint_classes()
+
         # Warm-up: run one dummy pass so first real frame is not slow
         dummy = np.zeros((imgsz, imgsz, 3), dtype=np.uint8)
         self.model.predict(
@@ -108,6 +112,27 @@ class PotholeDetector:
         )
         logger.info("Detector ready.")
 
+    def _validate_checkpoint_classes(self) -> None:
+        """Confirm target class represents pothole in the checkpoint; reject incompatible models."""
+        names = getattr(self.model, "names", {})
+        if not names:
+            return
+
+        cls_name = names.get(self.target_class_id, "")
+        if "pothole" not in str(cls_name).lower():
+            # Check if any other class is pothole
+            pothole_classes = [cid for cid, cname in names.items() if "pothole" in str(cname).lower()]
+            sample_classes = {cid: names[cid] for cid in list(names.keys())[:5]}
+            raise ValueError(
+                f"Incompatible YOLO checkpoint '{self.model_path.name}': "
+                f"class {self.target_class_id} is '{cls_name}', not 'pothole'. "
+                f"(Loaded model classes: {sample_classes}...). "
+                + (f"Pothole exists at class {pothole_classes[0]}; set target_class_id={pothole_classes[0]}."
+                   if pothole_classes else
+                   "This appears to be an un-fine-tuned base checkpoint (such as COCO yolo11n.pt). "
+                   "Please supply a fine-tuned pothole detector checkpoint (e.g. models/best.pt).")
+            )
+
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
@@ -119,11 +144,10 @@ class PotholeDetector:
         timestamp_ms: int = 0,
     ) -> list[FrameDetection]:
         """Run inference on a single BGR frame; return list of FrameDetection."""
-        import cv2
-
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        # Ultralytics BasePredictor.preprocess expects BGR numpy arrays and flips
+        # them to RGB internally via im.flip(1). Pass frame_bgr directly.
         results = self.model.predict(
-            frame_rgb,
+            frame_bgr,
             conf=self.conf,
             iou=self.iou,
             imgsz=self.imgsz,
@@ -163,20 +187,20 @@ class PotholeDetector:
     def process_video_frames(
         self,
         frame_iter,
+        total_frames: Optional[int] = None,
         progress_callback=None,
     ) -> list[FrameDetection]:
         """
         Process an iterator of (frame_index, timestamp_ms, bgr_frame) tuples.
+        Processes frames incrementally with bounded memory (O(1) frame storage).
         progress_callback(done, total) is called after each frame if provided.
         """
         all_detections: list[FrameDetection] = []
-        frames = list(frame_iter)
-        total = len(frames)
-        for i, (frame_index, timestamp_ms, bgr) in enumerate(frames):
+        for i, (frame_index, timestamp_ms, bgr) in enumerate(frame_iter):
             dets = self.run_on_frame(bgr, frame_index=frame_index, timestamp_ms=timestamp_ms)
             all_detections.extend(dets)
             if progress_callback:
-                progress_callback(i + 1, total)
+                progress_callback(i + 1, total_frames or (i + 1))
         return all_detections
 
     # ------------------------------------------------------------------

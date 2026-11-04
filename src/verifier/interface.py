@@ -23,12 +23,14 @@ from typing import Optional
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from src.verifier.preprocessing import (
+    IMAGENET_MEAN_RGB,
+    IMAGENET_STD_RGB,
+    TARGET_SIZE,
+    preprocess_crop_for_verifier,
+)
 
-# ImageNet normalization constants
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
-TARGET_SIZE = 224
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,6 +63,8 @@ class VerifierInterface:
         self._configured = False
         self._model_version = "not_configured"
         self._device = self._resolve_device(device)
+        self.class_to_idx: dict[str, int] = {"non_pothole": 0, "pothole": 1}
+        self.pothole_class_idx: int = 1
 
         if checkpoint_path is not None:
             self._try_load(Path(checkpoint_path))
@@ -95,45 +99,12 @@ class VerifierInterface:
         return [self.score_crop(c) for c in crops_bgr]
 
     # ------------------------------------------------------------------
-    # Preprocessing (identical at training and inference)
+    # Preprocessing (delegates to centralized shared preprocessing)
     # ------------------------------------------------------------------
 
     @staticmethod
     def preprocess_crop(crop_bgr: np.ndarray) -> np.ndarray:
-        """
-        Preprocess a BGR crop for MobileNetV3-Small:
-          1. Convert BGR → RGB
-          2. Resize longest side to 224 with preserved aspect ratio
-          3. Pad to 224×224 with ImageNet mean
-          4. Normalize to [0,1] and apply ImageNet mean/std
-          5. Return CHW float32 ndarray
-        """
-        import cv2
-
-        if crop_bgr is None or crop_bgr.size == 0:
-            # Return a blank tensor
-            return np.zeros((3, TARGET_SIZE, TARGET_SIZE), dtype=np.float32)
-
-        rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-
-        h, w = rgb.shape[:2]
-        scale = TARGET_SIZE / max(h, w)
-        new_h, new_w = int(round(h * scale)), int(round(w * scale))
-        resized = cv2.resize(rgb, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-        # Pad to TARGET_SIZE × TARGET_SIZE with ImageNet mean
-        canvas = np.full((TARGET_SIZE, TARGET_SIZE, 3), IMAGENET_MEAN, dtype=np.float32)
-        y0 = (TARGET_SIZE - new_h) // 2
-        x0 = (TARGET_SIZE - new_w) // 2
-        canvas[y0:y0 + new_h, x0:x0 + new_w] = resized
-
-        # Normalize
-        mean = np.array(IMAGENET_MEAN, dtype=np.float32)
-        std = np.array(IMAGENET_STD, dtype=np.float32)
-        canvas = (canvas - mean) / std
-
-        # HWC → CHW
-        return canvas.transpose(2, 0, 1).astype(np.float32)
+        return preprocess_crop_for_verifier(crop_bgr)
 
     # ------------------------------------------------------------------
     # Model loading
@@ -146,27 +117,40 @@ class VerifierInterface:
         try:
             import torch
             from torchvision.models import mobilenet_v3_small
-
-            # Build architecture matching training
-            model = mobilenet_v3_small(weights=None)
-            # Replace classifier head for binary classification
-            in_features = model.classifier[-1].in_features
             import torch.nn as nn
-            model.classifier[-1] = nn.Linear(in_features, 2)
 
             state = torch.load(str(path), map_location="cpu")
-            if isinstance(state, dict) and "model_state_dict" in state:
-                model.load_state_dict(state["model_state_dict"])
+            class_to_idx = {"non_pothole": 0, "pothole": 1}
+
+            if isinstance(state, dict):
+                model_state = state.get("model_state_dict", state)
                 self._model_version = state.get("version", path.stem)
+                if "class_to_idx" in state and isinstance(state["class_to_idx"], dict):
+                    class_to_idx = state["class_to_idx"]
+                elif "classes" in state and isinstance(state["classes"], list):
+                    class_to_idx = {name: idx for idx, name in enumerate(state["classes"])}
             else:
-                model.load_state_dict(state)
+                model_state = state
                 self._model_version = path.stem
 
+            self.class_to_idx = class_to_idx
+            self.pothole_class_idx = class_to_idx.get("pothole", 1)
+
+            # Build architecture matching training
+            num_classes = max(2, len(class_to_idx))
+            model = mobilenet_v3_small(weights=None)
+            in_features = model.classifier[-1].in_features
+            model.classifier[-1] = nn.Linear(in_features, num_classes)
+
+            model.load_state_dict(model_state)
             model.eval()
             model.to(self._device)
             self._model = model
             self._configured = True
-            logger.info("Verifier loaded from %s (device=%s)", path, self._device)
+            logger.info(
+                "Verifier loaded from %s (device=%s, pothole_idx=%d, classes=%s)",
+                path, self._device, self.pothole_class_idx, self.class_to_idx,
+            )
         except Exception as exc:
             logger.warning("Failed to load verifier from %s: %s", path, exc)
             self._configured = False
@@ -182,8 +166,7 @@ class VerifierInterface:
         with torch.no_grad():
             logits = self._model(tensor)
             probs = torch.softmax(logits, dim=1)
-            # Class 1 = pothole (convention: 0=non_pothole, 1=pothole)
-            return float(probs[0, 1].item())
+            return float(probs[0, self.pothole_class_idx].item())
 
     @staticmethod
     def _resolve_device(device: str) -> str:

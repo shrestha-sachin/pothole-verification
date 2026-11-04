@@ -1,7 +1,14 @@
-# YOLO Dataset Configuration - Generated from RDD2022
-path: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022
-train: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022/train.txt
-val: C:/SACHIN/Projects/pothole-verification/data/processes/rdd2022/val.txt
+# YOLO Dataset Configuration for Pothole Verification
+# Portable relative paths (resolved relative to this project root)
+path: .
+
+# Training sets
+train:
+  - exports/yolo_labels/train.txt
+
+# Validation sets (when held-out validation is prepared)
+val:
+  - exports/yolo_labels/train.txt
 
 names:
   0: pothole
