@@ -378,10 +378,30 @@ def page_process():
     step_header(1, "Select YOLO model checkpoint")
 
     candidate_models: list[Path] = []
-    for d in [MODELS_DIR, PROJECT_ROOT]:
-        if d.exists():
-            candidate_models.extend(d.glob("*.pt"))
-    candidate_models = sorted(set(candidate_models))
+    # Search models/, weights/, and YOLO training runs (runs/)
+    for folder, pattern in [
+        (PROJECT_ROOT / "models", "**/*.pt"),
+        (PROJECT_ROOT / "weights", "**/*.pt"),
+        (PROJECT_ROOT / "runs", "**/*.pt"),
+        (PROJECT_ROOT, "*.pt"),
+    ]:
+        if folder.exists():
+            candidate_models.extend(folder.glob(pattern))
+
+    # Deduplicate and sort: prioritize best.pt, then newest modified first
+    def _model_sort_key(p: Path) -> tuple[int, float]:
+        is_best = 0 if "best" in p.name.lower() else 1
+        mtime = -p.stat().st_mtime if p.exists() else 0.0
+        return (is_best, mtime)
+
+    candidate_models = sorted(set(candidate_models), key=_model_sort_key)
+
+    def _format_model_choice(p_str: str) -> str:
+        try:
+            rel = Path(p_str).relative_to(PROJECT_ROOT)
+            return str(rel)
+        except ValueError:
+            return Path(p_str).name
 
     col_m, col_minfo = st.columns([3, 1])
     with col_m:
@@ -389,12 +409,12 @@ def page_process():
             model_choice = st.selectbox(
                 "Detected checkpoints",
                 options=[str(p) for p in candidate_models],
-                format_func=lambda p: Path(p).name,
-                help="Place your fine-tuned best.pt in the models/ directory.",
+                format_func=_format_model_choice,
+                help="Checkpoints found in runs/, weights/, models/, and project root.",
             )
         else:
             model_choice = ""
-            st.warning("No `.pt` files found in `models/` or project root. Place your YOLO checkpoint there.")
+            st.warning("No `.pt` files found in `runs/`, `weights/`, `models/`, or project root.")
         model_path_input = st.text_input(
             "Or enter path manually",
             value=model_choice,
@@ -402,6 +422,8 @@ def page_process():
         )
     with col_minfo:
         mp = Path(model_path_input.strip()) if model_path_input.strip() else None
+        if mp and not mp.is_absolute() and not mp.exists() and (PROJECT_ROOT / mp).exists():
+            mp = PROJECT_ROOT / mp
         model_valid = False
         if mp and mp.exists():
             st.metric("Checkpoint", f"{mp.stat().st_size / (1024*1024):.1f} MB")
@@ -547,8 +569,11 @@ def page_process():
         st.warning("Select or upload a video to continue.")
 
     if st.button("Execute Pipeline", disabled=not can_run, type="primary", use_container_width=True):
+        chosen_mp = Path(model_path_input.strip())
+        if not chosen_mp.is_absolute() and not chosen_mp.exists() and (PROJECT_ROOT / chosen_mp).exists():
+            chosen_mp = PROJECT_ROOT / chosen_mp
         _run_analysis(
-            db, video_path_final, video_id_final, Path(model_path_input.strip()),
+            db, video_path_final, video_id_final, chosen_mp,
             verifier_path_input.strip() or None, sample_fps, conf_threshold,
             iou_threshold, int(imgsz), road_segment_id, int(policy_b_min_obs),
             verifier_threshold, preserve_reviews=preserve_reviews, generate_clips=generate_clips,
