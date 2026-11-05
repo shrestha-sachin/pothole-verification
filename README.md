@@ -135,7 +135,7 @@ python scripts/extract_frames.py --video data/raw/local_video/your_video.mp4 --d
 ### 5. Launch the annotation interface
 ```bash
 # Install once (requires network):
-pip install streamlit streamlit-drawable-canvas
+pip install "streamlit>=1.45" Pillow
 
 # Launch:
 streamlit run dashboard/annotate.py
@@ -154,14 +154,13 @@ Opens at `http://localhost:8501`.
 1. Browse images in the sidebar; use filters to find unreviewed images
 2. Draw tight bounding boxes around every clearly visible pothole on the canvas
 3. Check label checkboxes: shadows present, patches present, manholes present
-4. If unsure, tick "Uncertain — exclude from export"
-5. Click **Save Annotation**, then **Mark as Reviewed**
-6. For images with no potholes: click **No Potholes (reviewed)**
+4. If unsure, choose **Uncertain — exclude from training**
+5. Choose a review decision and click **Save review** or **Save review & next**
+6. For images with no potholes: save a **Reviewed** decision with no pothole boxes
 
 **Negative regions** (for the verifier classifier):
-- Scroll to "Negative Regions"
-- Select subtype: shadow / repaired_patch / manhole / ordinary_road
-- Draw the region (or import JSON)
+- Choose Shadow, Repaired patch, Manhole, or Ordinary road in the canvas category selector
+- Draw the region, then adjust it with Select if necessary
 
 Annotations save to `data/annotations/green_bay/<image_id>.json`.
 
@@ -351,3 +350,42 @@ Synthetic model services exercise detector, processing, verifier and persistence
 failure paths without downloading checkpoints or starting training. Streamlit
 AppTest covers navigation and review controls. These tests do not establish real
 model accuracy or replace a visual browser check on your own footage.
+
+
+## Annotation workspace
+
+Launch with `python -m streamlit run dashboard/annotate.py`. The editor uses a
+bundled, dependency-free canvas; `streamlit-drawable-canvas` is no longer required.
+There is one navigation pair, one drawing toolbar, and one review form.
+
+- **Draw**: drag in either direction. Choose pothole, shadow, repaired patch,
+  manhole, or ordinary road before drawing.
+- **Select**: click a box to move it, or drag one of its eight handles to resize.
+  The selected-box inspector supports exact original-image pixel coordinates,
+  reclassification, and optional physical pothole IDs.
+- **Pan**: drag the image, or hold Space temporarily. Wheel zooms at the pointer;
+  Fit restores the complete frame. Fullscreen uses the same editor and controls.
+- Undo/redo and Delete work locally. D/V/H switch tools; Ctrl/Cmd+Z undoes.
+  Shortcuts are scoped to the editor and never intercept text fields or page buttons.
+- Completed box edits save automatically without resetting the canvas or marking
+  the image reviewed. Review decisions, flags and notes save only when the review
+  form is submitted. Unsaved form changes are not carried across images.
+- Annotation metadata and physical IDs survive edits. Any box edit invalidates
+  prior ground-truth verification; verify the frame again before scored evaluation.
+  Existing annotation JSON paths and coordinate conventions are preserved.
+
+The old batch actions that automatically assigned repaired-road labels or invented
+central patch crops have been removed. No existing annotations are rewritten by
+opening the tool. Errors are reported with a contextual Retry save control.
+
+Optional browser interaction regression:
+
+```bash
+python -m pip install pytest playwright
+python -m playwright install chromium
+python -m pytest tests/test_annotation_editor.py tests/test_annotation_canvas_browser.py -q
+```
+
+The browser test uses a synthetic image and checks reverse-direction drawing,
+local pointer motion, selection, moving, resizing, category changes, undo/redo,
+deleting and toolbar click targets. It never reads or modifies real footage.
