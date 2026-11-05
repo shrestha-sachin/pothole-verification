@@ -1,0 +1,74 @@
+{
+  "image_id": "mly_712121910929884",
+  "source_filepath": "data/raw/mapillary/segment_003/images/712121910929884.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 613,
+      "y": 1078,
+      "w": 275,
+      "h": 93,
+      "_editor_id": "d8a71555-1ea5-4c34-a662-80eabafe3920",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 820,
+      "y": 896,
+      "w": 149,
+      "h": 141,
+      "_editor_id": "4ffe0152-6624-4b7d-862a-aba1fa51edb6",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1490,
+      "y": 1068,
+      "w": 108,
+      "h": 89,
+      "_editor_id": "f4fdc381-868c-4817-9f45-0abac8869727",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1651,
+      "y": 1145,
+      "w": 143,
+      "h": 109,
+      "_editor_id": "386e72aa-6e33-409f-995b-745b785ec734",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1826,
+      "y": 1063,
+      "w": 222,
+      "h": 139,
+      "_editor_id": "6f6e482a-e376-4bb1-bbb3-c02e41f164cd",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1241,
+      "y": 953,
+      "w": 190,
+      "h": 97,
+      "_editor_id": "62204872-288b-4b55-a38a-038746d93cbe",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1121,
+      "y": 865,
+      "w": 138,
+      "h": 86,
+      "_editor_id": "0f996974-89c0-43bd-b72e-d77786439b88",
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
+}

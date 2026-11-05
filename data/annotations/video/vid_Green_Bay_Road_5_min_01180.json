@@ -14,15 +14,48 @@
       "x": 2303,
       "y": 1676,
       "w": 113,
-      "h": 52
+      "h": 52,
+      "_editor_id": "6c563acbc37147139f27bb964a373615"
     },
     {
       "x": 414,
       "y": 1976,
       "w": 230,
-      "h": 113
+      "h": 113,
+      "_editor_id": "b24c4a61ba3041bf89f85af7ce7a18d2"
+    },
+    {
+      "x": 2708,
+      "y": 2012,
+      "w": 110,
+      "h": 68,
+      "_editor_id": "5a0b358a-b3b0-4685-bc33-a252b0959f21"
+    },
+    {
+      "x": 2210,
+      "y": 1591,
+      "w": 29,
+      "h": 17,
+      "_editor_id": "3d8eed7f-0636-45ce-ad04-0cf8480b17f4"
+    },
+    {
+      "x": 2240,
+      "y": 1617,
+      "w": 45,
+      "h": 26,
+      "_editor_id": "96e4ffb9-a881-4a0a-b837-ac3b2d59f7cd"
+    },
+    {
+      "x": 2092,
+      "y": 1483,
+      "w": 38,
+      "h": 27,
+      "_editor_id": "6eec4efe-5457-4e9c-8ff8-0b760571d49c"
     }
   ],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 20002,
+  "video_id": "Green_Bay_Road_5_min"
 }

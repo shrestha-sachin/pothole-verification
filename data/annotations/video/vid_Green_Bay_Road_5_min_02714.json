@@ -9,7 +9,18 @@
   "manholes_present": false,
   "uncertain": false,
   "notes": "",
-  "pothole_boxes": [],
+  "pothole_boxes": [
+    {
+      "x": 2650,
+      "y": 1557,
+      "w": 69,
+      "h": 36,
+      "_editor_id": "662c454a-d8f2-4889-ad1d-16f1e7520149"
+    }
+  ],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 46006,
+  "video_id": "Green_Bay_Road_5_min"
 }

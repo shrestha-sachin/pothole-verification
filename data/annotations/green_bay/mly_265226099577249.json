@@ -1,0 +1,26 @@
+{
+  "image_id": "mly_265226099577249",
+  "source_filepath": "data/raw/mapillary/segment_003/images/265226099577249.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 1776,
+      "y": 1115,
+      "w": 172,
+      "h": 72,
+      "_editor_id": "3cf536d7-f275-43bc-a5a9-63721fe19127",
+      "subtype": "manhole"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
+}

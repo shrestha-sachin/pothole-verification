@@ -11,27 +11,54 @@
   "notes": "",
   "pothole_boxes": [
     {
-      "x": 1114,
-      "y": 1854,
-      "w": 310,
-      "h": 108
+      "x": 1193,
+      "y": 1866,
+      "w": 165,
+      "h": 74,
+      "_editor_id": "7bccb0b3a50f4a5294047d1ebd3a4b15"
+    },
+    {
+      "x": 2815,
+      "y": 1668,
+      "w": 55,
+      "h": 26,
+      "_editor_id": "f633613c-8df4-4117-9235-430ac1ae928e"
+    },
+    {
+      "x": 2712,
+      "y": 1594,
+      "w": 52,
+      "h": 33,
+      "_editor_id": "4a02eb18-97d1-4d3c-931e-4c9e9ff5f827"
+    },
+    {
+      "x": 1398,
+      "y": 1731,
+      "w": 100,
+      "h": 29,
+      "_editor_id": "c9007dc0-0bff-4245-8e1c-264a1ee60f90"
     }
   ],
   "negative_regions": [
     {
-      "x": 456,
-      "y": 1723,
-      "w": 409,
-      "h": 127,
+      "x": 544,
+      "y": 1759,
+      "w": 288,
+      "h": 56,
+      "_editor_id": "c195785d4bf547f3a57e03260acebb5b",
       "subtype": "manhole"
     },
     {
-      "x": 2106,
-      "y": 1788,
-      "w": 512,
-      "h": 131,
+      "x": 2197,
+      "y": 1825,
+      "w": 303,
+      "h": 86,
+      "_editor_id": "2413839633dc4659b8b3fb509dab33b0",
       "subtype": "manhole"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 198007,
+  "video_id": "Green_Bay_Road_5_min"
 }

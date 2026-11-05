@@ -16,8 +16,20 @@
       "y": 1323,
       "w": 357,
       "h": 75,
+      "_editor_id": "983080de2d934ee596bd6138d7a6c01a",
       "subtype": "manhole"
+    },
+    {
+      "x": 635,
+      "y": 1355,
+      "w": 312,
+      "h": 75,
+      "_editor_id": "4e5f8779-92b7-49fd-ad2f-a09bfb879909",
+      "subtype": "repaired_patch"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 302002,
+  "video_id": "Green_Bay_Road_5_min"
 }

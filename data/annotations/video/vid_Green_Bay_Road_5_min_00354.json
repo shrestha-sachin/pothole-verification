@@ -9,7 +9,15 @@
   "manholes_present": false,
   "uncertain": false,
   "notes": "",
-  "pothole_boxes": [],
+  "pothole_boxes": [
+    {
+      "x": 2645,
+      "y": 1831,
+      "w": 87,
+      "h": 37,
+      "_editor_id": "f82673dd-4b12-4d31-a2f5-275198cb2f36"
+    }
+  ],
   "negative_regions": [],
   "annotation_version": 1,
   "ground_truth_verified": false,

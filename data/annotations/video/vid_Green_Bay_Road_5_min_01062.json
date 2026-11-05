@@ -9,13 +9,43 @@
   "manholes_present": false,
   "uncertain": false,
   "notes": "",
-  "pothole_boxes": [],
+  "pothole_boxes": [
+    {
+      "x": 3053,
+      "y": 1924,
+      "w": 91,
+      "h": 46,
+      "_editor_id": "6a2a0e7b-40ea-4792-82fb-2b38699f5715"
+    },
+    {
+      "x": 1012,
+      "y": 1967,
+      "w": 114,
+      "h": 52,
+      "_editor_id": "debb9c72-0e06-4656-a29c-29115ec68c3f"
+    },
+    {
+      "x": 1384,
+      "y": 1950,
+      "w": 151,
+      "h": 46,
+      "_editor_id": "61c89359-92b8-496b-83e5-df5b393ea16a"
+    },
+    {
+      "x": 2532,
+      "y": 1564,
+      "w": 66,
+      "h": 30,
+      "_editor_id": "3268d77d-fdf0-4dd2-b24c-35c5c7da9d96"
+    }
+  ],
   "negative_regions": [
     {
-      "x": 2623,
-      "y": 1732,
-      "w": 254,
-      "h": 164,
+      "x": 2698,
+      "y": 1773,
+      "w": 152,
+      "h": 102,
+      "_editor_id": "b43a433604004c91ba0623c2399193a6",
       "subtype": "repaired_patch"
     }
   ],

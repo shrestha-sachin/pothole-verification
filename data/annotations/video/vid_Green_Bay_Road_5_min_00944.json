@@ -9,7 +9,29 @@
   "manholes_present": false,
   "uncertain": false,
   "notes": "",
-  "pothole_boxes": [],
+  "pothole_boxes": [
+    {
+      "x": 935,
+      "y": 1979,
+      "w": 110,
+      "h": 53,
+      "_editor_id": "dc92af59-4ee4-48e5-bcab-213a55698ece"
+    },
+    {
+      "x": 2607,
+      "y": 1547,
+      "w": 62,
+      "h": 30,
+      "_editor_id": "5dc932d7-9e4c-4035-9826-5e5c23ed49b5"
+    },
+    {
+      "x": 2754,
+      "y": 1638,
+      "w": 46,
+      "h": 24,
+      "_editor_id": "8aa1d51a-a351-47e2-9eb0-582c2c6014b4"
+    }
+  ],
   "negative_regions": [],
   "annotation_version": 1,
   "ground_truth_verified": false,

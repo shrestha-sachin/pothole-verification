@@ -11,12 +11,16 @@
   "notes": "",
   "pothole_boxes": [
     {
-      "x": 2557,
-      "y": 1615,
-      "w": 254,
-      "h": 127
+      "x": 2629,
+      "y": 1652,
+      "w": 117,
+      "h": 42,
+      "_editor_id": "8a88db318f1449e5b8a8045911f0d1e8"
     }
   ],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 28003,
+  "video_id": "Green_Bay_Road_5_min"
 }

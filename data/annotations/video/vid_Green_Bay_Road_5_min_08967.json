@@ -12,12 +12,16 @@
   "pothole_boxes": [],
   "negative_regions": [
     {
-      "x": 841,
-      "y": 1704,
-      "w": 503,
-      "h": 174,
+      "x": 871,
+      "y": 1731,
+      "w": 239,
+      "h": 76,
+      "_editor_id": "73c5e1947a944f569c139b33032c4375",
       "subtype": "repaired_patch"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 152001,
+  "video_id": "Green_Bay_Road_5_min"
 }

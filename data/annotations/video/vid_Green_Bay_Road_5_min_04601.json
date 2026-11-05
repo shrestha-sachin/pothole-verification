@@ -5,11 +5,14 @@
   "image_height": 2160,
   "review_status": "reviewed",
   "shadows_present": false,
-  "patches_present": true,
+  "patches_present": false,
   "manholes_present": false,
   "uncertain": false,
   "notes": "",
   "pothole_boxes": [],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 77992,
+  "video_id": "Green_Bay_Road_5_min"
 }

@@ -1,0 +1,58 @@
+{
+  "image_id": "mly_710596907494529",
+  "source_filepath": "data/raw/mapillary/segment_003/images/710596907494529.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 657,
+      "y": 970,
+      "w": 125,
+      "h": 67,
+      "_editor_id": "2f99685c-5b79-4cc8-873b-a959a52666b0",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1177,
+      "y": 1022,
+      "w": 159,
+      "h": 29,
+      "_editor_id": "55ef7eb3-de99-4f6d-ba7e-f396f8e7beea",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1171,
+      "y": 958,
+      "w": 24,
+      "h": 24,
+      "_editor_id": "29053baf-cc6b-4ffa-8db1-762e30d39b64",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 1080,
+      "y": 904,
+      "w": 82,
+      "h": 37,
+      "_editor_id": "096274a7-6a40-4744-9634-fa8f9de3f8f2",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 828,
+      "y": 893,
+      "w": 55,
+      "h": 21,
+      "_editor_id": "0ff61644-6732-42cc-b3f8-a91eebbee5c1",
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
+}

@@ -19,5 +19,8 @@
       "subtype": "repaired_patch"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 231994,
+  "video_id": "Green_Bay_Road_5_min"
 }

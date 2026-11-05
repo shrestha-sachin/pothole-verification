@@ -12,12 +12,31 @@
   "pothole_boxes": [],
   "negative_regions": [
     {
-      "x": 1198,
-      "y": 966,
-      "w": 79,
-      "h": 558,
+      "x": 1144,
+      "y": 853,
+      "w": 201,
+      "h": 673,
+      "_editor_id": "501393a9a89b4c7a900c8dbb4fcf365a",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 459,
+      "y": 1024,
+      "w": 160,
+      "h": 76,
+      "_editor_id": "f54a5978-0f32-47cd-9781-8d56c0a8029e",
+      "subtype": "repaired_patch"
+    },
+    {
+      "x": 793,
+      "y": 945,
+      "w": 894,
+      "h": 37,
+      "_editor_id": "f826e469-b5f8-4d02-ad47-771c7285f610",
       "subtype": "repaired_patch"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
 }

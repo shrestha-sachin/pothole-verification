@@ -11,20 +11,25 @@
   "notes": "",
   "pothole_boxes": [
     {
-      "x": 1419,
-      "y": 1652,
-      "w": 226,
-      "h": 131
+      "x": 1491,
+      "y": 1666,
+      "w": 129,
+      "h": 80,
+      "_editor_id": "aab0f6c3522048bf81db75ce98ae52b2"
     }
   ],
   "negative_regions": [
     {
-      "x": 1466,
-      "y": 1431,
-      "w": 301,
-      "h": 99,
+      "x": 1543,
+      "y": 1471,
+      "w": 187,
+      "h": 49,
+      "_editor_id": "1acec0c764f144f6ba94a67b8bdf57a2",
       "subtype": "manhole"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 164003,
+  "video_id": "Green_Bay_Road_5_min"
 }

@@ -10,6 +10,18 @@
   "uncertain": false,
   "notes": "",
   "pothole_boxes": [],
-  "negative_regions": [],
-  "annotation_version": 1
+  "negative_regions": [
+    {
+      "x": 344,
+      "y": 1826,
+      "w": 772,
+      "h": 45,
+      "_editor_id": "438091e7-08bb-44d1-a867-74b0407b1d3c",
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 233994,
+  "video_id": "Green_Bay_Road_5_min"
 }

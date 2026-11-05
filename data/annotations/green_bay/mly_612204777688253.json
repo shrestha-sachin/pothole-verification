@@ -1,0 +1,26 @@
+{
+  "image_id": "mly_612204777688253",
+  "source_filepath": "data/raw/mapillary/segment_003/images/612204777688253.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 3,
+      "y": 1288,
+      "w": 137,
+      "h": 248,
+      "_editor_id": "7625c030-c66d-4c71-9b59-c87e94d1b948",
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
+}

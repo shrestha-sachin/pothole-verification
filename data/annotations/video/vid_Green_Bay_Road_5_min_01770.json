@@ -11,18 +11,51 @@
   "notes": "",
   "pothole_boxes": [
     {
-      "x": 2745,
-      "y": 1807,
-      "w": 329,
-      "h": 155
+      "x": 2836,
+      "y": 1842,
+      "w": 129,
+      "h": 56,
+      "_editor_id": "341dc513d46546feb53b8d7d467cbdef"
     },
     {
-      "x": 644,
-      "y": 1835,
-      "w": 244,
-      "h": 94
+      "x": 712,
+      "y": 1857,
+      "w": 101,
+      "h": 65,
+      "_editor_id": "c7708f88029341bc966ce445fcbe95e3"
+    },
+    {
+      "x": 628,
+      "y": 1864,
+      "w": 80,
+      "h": 35,
+      "_editor_id": "4a74219c-2161-4e80-8196-3bca25b44182"
+    },
+    {
+      "x": 2160,
+      "y": 1871,
+      "w": 112,
+      "h": 34,
+      "_editor_id": "e6e96483-c426-4b16-a7f8-37844347b22b"
+    },
+    {
+      "x": 2342,
+      "y": 1869,
+      "w": 143,
+      "h": 31,
+      "_editor_id": "3ee4d534-02d1-4bca-8851-d766ffe1c6e2"
+    },
+    {
+      "x": 2324,
+      "y": 1481,
+      "w": 36,
+      "h": 19,
+      "_editor_id": "4235d38e-1d1b-42d3-8ec6-58f4a3eab5fb"
     }
   ],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 30004,
+  "video_id": "Green_Bay_Road_5_min"
 }

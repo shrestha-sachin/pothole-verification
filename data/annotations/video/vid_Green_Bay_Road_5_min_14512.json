@@ -11,5 +11,8 @@
   "notes": "",
   "pothole_boxes": [],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 245996,
+  "video_id": "Green_Bay_Road_5_min"
 }

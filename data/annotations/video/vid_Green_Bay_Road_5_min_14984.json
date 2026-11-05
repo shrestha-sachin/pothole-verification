@@ -14,9 +14,20 @@
       "x": 2500,
       "y": 1460,
       "w": 188,
-      "h": 117
+      "h": 117,
+      "_editor_id": "177641e95d67420189e5bb1fc01e52e4"
+    },
+    {
+      "x": 2402,
+      "y": 1713,
+      "w": 101,
+      "h": 61,
+      "_editor_id": "d9ab6c9b-dcba-498b-9d40-1efbd2af358a"
     }
   ],
   "negative_regions": [],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 253997,
+  "video_id": "Green_Bay_Road_5_min"
 }

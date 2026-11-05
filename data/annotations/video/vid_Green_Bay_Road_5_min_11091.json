@@ -12,12 +12,16 @@
   "pothole_boxes": [],
   "negative_regions": [
     {
-      "x": 1372,
-      "y": 1394,
-      "w": 371,
-      "h": 131,
+      "x": 1455,
+      "y": 1442,
+      "w": 209,
+      "h": 60,
+      "_editor_id": "a7d4baf8a7a340e4a0f6502729193386",
       "subtype": "manhole"
     }
   ],
-  "annotation_version": 1
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 188006,
+  "video_id": "Green_Bay_Road_5_min"
 }

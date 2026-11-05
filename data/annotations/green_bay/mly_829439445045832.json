@@ -1,0 +1,58 @@
+{
+  "image_id": "mly_829439445045832",
+  "source_filepath": "data/raw/mapillary/segment_003/images/829439445045832.jpg",
+  "image_width": 2048,
+  "image_height": 1536,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [
+    {
+      "x": 1055,
+      "y": 1020,
+      "w": 61,
+      "h": 51,
+      "_editor_id": "33e09821-8416-4840-a6c4-613c227493df"
+    }
+  ],
+  "negative_regions": [
+    {
+      "x": 1329,
+      "y": 1063,
+      "w": 79,
+      "h": 38,
+      "_editor_id": "6a216df3-becb-49be-afb3-0af2be511253",
+      "subtype": "manhole"
+    },
+    {
+      "x": 794,
+      "y": 1035,
+      "w": 68,
+      "h": 20,
+      "_editor_id": "269039e7-73f2-4def-bbf9-0e67daf5a476",
+      "subtype": "manhole"
+    },
+    {
+      "x": 147,
+      "y": 1228,
+      "w": 63,
+      "h": 19,
+      "_editor_id": "6c819797-7924-4c18-991b-0ad938564d4a",
+      "subtype": "manhole"
+    },
+    {
+      "x": 295,
+      "y": 1370,
+      "w": 112,
+      "h": 64,
+      "_editor_id": "07390a1b-dd50-49af-9d5d-f40b38822849",
+      "subtype": "repaired_patch"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "video_id": ""
+}
