@@ -131,6 +131,10 @@ class Database:
     def _init_schema(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SCHEMA_SQL)
+            conn.execute("CREATE TABLE IF NOT EXISTS run_archive (run_id TEXT PRIMARY KEY, video_id TEXT NOT NULL, archived_at TEXT NOT NULL, snapshot TEXT NOT NULL)")
+            vcols = [r[1] for r in conn.execute("PRAGMA table_info(videos)")]
+            if "run_config" not in vcols:
+                conn.execute("ALTER TABLE videos ADD COLUMN run_config TEXT")
             # Add columns if migrating from earlier schema
             cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
             if "rep_timestamp_ms" not in cols:
@@ -140,6 +144,9 @@ class Database:
 
     @contextmanager
     def _conn(self) -> Generator[sqlite3.Connection, None, None]:
+        if getattr(self, "_transaction", None) is not None:
+            yield self._transaction
+            return
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -163,7 +170,7 @@ class Database:
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO videos
+                INSERT INTO videos
                   (video_id, filename, filepath, road_segment_id, duration_sec,
                    fps, width, height, file_size_mb, registered_at,
                    processing_status, notes)
@@ -171,6 +178,12 @@ class Database:
                   (:video_id, :filename, :filepath, :road_segment_id, :duration_sec,
                    :fps, :width, :height, :file_size_mb, :registered_at,
                    :processing_status, :notes)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    filename=excluded.filename, filepath=excluded.filepath,
+                    road_segment_id=excluded.road_segment_id,
+                    duration_sec=excluded.duration_sec, fps=excluded.fps,
+                    width=excluded.width, height=excluded.height,
+                    file_size_mb=excluded.file_size_mb
                 """,
                 {
                     "video_id": video_id,
@@ -194,6 +207,7 @@ class Database:
                 """
                 UPDATE videos SET
                     processing_status   = 'processing',
+                    run_config          = :run_config,
                     processing_started  = :ts,
                     sample_fps          = :sample_fps,
                     model_path          = :model_path,
@@ -204,6 +218,7 @@ class Database:
                 {
                     "video_id": video_id,
                     "ts": self._now(),
+                    "run_config": json.dumps(run_config),
                     "sample_fps": run_config.get("sample_fps"),
                     "model_path": run_config.get("model_path"),
                     "detector_conf": run_config.get("detector_conf"),
@@ -347,7 +362,7 @@ class Database:
                 {
                     "event_id": event_id,
                     "decision": decision,
-                    "fp_category": fp_category,
+                    "fp_category": fp_category if decision == "rejected" else None,
                     "notes": notes,
                     "ts": self._now(),
                 },
@@ -494,7 +509,7 @@ class Database:
             "policy_c_score", "policy_c_retained",
             "full_frame_path", "crop_path", "clip_path",
             "review_decision", "fp_category", "reviewer_notes", "reviewed_at",
-            "model_path", "model_version", "sample_fps", "detector_conf", "created_at",
+            "model_path", "model_version", "sample_fps", "detector_conf", "run_config", "created_at",
         ]
 
         buf = io.StringIO()
@@ -510,6 +525,7 @@ class Database:
                 "fp_category": review.get("fp_category", ""),
                 "reviewer_notes": review.get("reviewer_notes", ""),
                 "reviewed_at": review.get("reviewed_at", ""),
+                "run_config": vmeta.get("run_config", ""),
                 "model_path": vmeta.get("model_path", ""),
                 "model_version": vmeta.get("model_version", ""),
                 "sample_fps": vmeta.get("sample_fps", ""),
@@ -563,12 +579,20 @@ class Database:
             return 0
         reattached = 0
         new_events = self.get_events(video_id=video_id, include_reviews=False)
+        used = set()
+        from src.evaluation.matcher import box_iou
         for rev in preserved_reviews:
             r_ts = rev.get("first_timestamp_ms", 0)
             # Find best matching event within time_tolerance_ms
             best_ev = None
             best_diff = float("inf")
             for ev in new_events:
+                if ev["event_id"] in used:
+                    continue
+                overlap = box_iou([rev.get(k, 0) for k in ("rep_x1", "rep_y1", "rep_x2", "rep_y2")],
+                                  [ev.get(k, 0) for k in ("rep_x1", "rep_y1", "rep_x2", "rep_y2")])
+                if overlap < 0.5:
+                    continue
                 diff = abs(ev["first_timestamp_ms"] - r_ts)
                 if diff <= time_tolerance_ms and diff < best_diff:
                     best_diff = diff
@@ -580,8 +604,47 @@ class Database:
                     fp_category=rev.get("fp_category"),
                     notes=rev.get("reviewer_notes", ""),
                 )
+                used.add(best_ev["event_id"])
                 reattached += 1
         return reattached
+
+    def replace_completed_run(self, video_id, meta, events, config, frames, preserve_reviews=True):
+        """Atomically publish a completed run; archive previous evidence references and reviews.
+
+        Evidence must already exist in a unique run directory. Failure rolls back all
+        database changes. Old evidence is deliberately retained for archived reviews.
+        """
+        import uuid
+        if any(ev.video_id != video_id for ev in events):
+            raise ValueError("Replacement events must belong to the selected video")
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._transaction = conn
+            try:
+                old = self.get_events(video_id, include_reviews=True)
+                previous = self.get_video(video_id)
+                if previous:
+                    for ev in old:
+                        ev["observations"] = self.get_event(ev["event_id"])["observations"]
+                    conn.execute("INSERT INTO run_archive VALUES (?, ?, ?, ?)",
+                                 (str(uuid.uuid4()), video_id, self._now(),
+                                  json.dumps({"video": previous, "events": old})))
+                preserved = self.delete_events_for_video(video_id, clear_reviews=not preserve_reviews)
+                self.register_video(video_id, meta)
+                self.mark_processing_started(video_id, config)
+                self.save_events(events)
+                transferred = self.reattach_preserved_reviews(video_id, preserved)
+                self.mark_processing_done(video_id, frames)
+            finally:
+                self._transaction = None
+        return {"transferred": transferred, "unmatched": len(preserved) - transferred}
+
+    def export_run_archive(self, video_id=None):
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM run_archive" +
+                                (" WHERE video_id = ?" if video_id else ""),
+                                (video_id,) if video_id else ()).fetchall()
+        return json.dumps([dict(r) for r in rows], indent=2)
 
     def get_video_stats(self, video_id: str) -> dict:
         """Return event, detection, and review counts along with processing status for a video."""

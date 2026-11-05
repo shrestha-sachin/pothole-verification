@@ -26,16 +26,9 @@ vid_01,2000,100,120,180,200,defect_2,shadow
         self.assertEqual(annotations[1].label, "shadow")
         self.assertFalse(annotations[1].is_pothole)
 
-    def test_load_video_ground_truth_clustering(self):
-        # Green_Bay_Road_5_min annotations exist in data/annotations/video/
-        annotations = load_video_ground_truth("Green_Bay_Road_5_min")
-        self.assertGreater(len(annotations), 0)
-
-        # Check that physical clustering took place: total annotations > unique gt_event_id
-        potholes = [a for a in annotations if a.is_pothole]
-        unique_defects = set(a.gt_event_id for a in potholes)
-        self.assertGreater(len(potholes), 0)
-        self.assertLessEqual(len(unique_defects), len(potholes))
+    def test_legacy_annotations_are_not_automatic_ground_truth(self):
+        # Old files lack explicit video identity and verified physical IDs.
+        self.assertEqual(load_video_ground_truth("Green_Bay_Road_5_min"), [])
 
 
 if __name__ == "__main__":

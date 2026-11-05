@@ -491,171 +491,79 @@ def run_sensitivity_analysis(
     return results
 
 
-def load_video_ground_truth(
-    video_id: str,
-    project_root: Optional[Path | str] = None,
-) -> list[GroundTruthAnnotation]:
-    """Load and cluster ground-truth annotations for a video from data/annotations/video/.
+def load_video_ground_truth(video_id: str, project_root=None) -> list[GroundTruthAnnotation]:
+    """Load explicitly verified annotations with exact video identity and physical IDs.
 
-    Groups multi-frame consecutive observations of the same defect into unified
-    physical defect IDs (gt_event_id) so the denominator is not inflated.
+    Legacy frame annotations remain usable for training, but require explicit
+    video_id, timestamp_ms, ground_truth_verified and per-box gt_event_id for scoring.
+    No filename inference or automatic physical-defect clustering is performed.
     """
     import json
-    import re
     from pathlib import Path
-
-    root = Path(project_root) if project_root else Path(__file__).resolve().parent.parent.parent
-    anno_dir = root / "data" / "annotations" / "video"
-    if not anno_dir.exists():
-        return []
-
-    # Match JSONs for this video
-    norm_vid = video_id.lower().replace(" ", "_").replace("-", "_")
-    matched_files = []
-    for f in sorted(anno_dir.glob("*.json")):
-        if norm_vid in f.stem.lower() or "green_bay" in f.stem.lower():
-            matched_files.append(f)
-
-    if not matched_files:
-        return []
-
-    raw_items: list[dict] = []
-    for f in matched_files:
+    root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
+    annotations = []
+    for path in sorted((root / "data/annotations/video").glob("*.json")):
         try:
-            d = json.loads(f.read_text())
-        except Exception:
+            data = json.loads(path.read_text())
+        except (ValueError, OSError):
             continue
-        if d.get("review_status") != "reviewed" or d.get("uncertain"):
+        if data.get("video_id") != video_id:
             continue
-
-        source = d.get("source_filepath", "")
-        m = re.search(r"_t(\d+)", source)
-        ts = int(m.group(1)) if m else 0
-        img_id = d.get("image_id", f.stem)
-
-        for b in d.get("pothole_boxes", []):
-            x, y, w, h = int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])
-            raw_items.append({
-                "video_id": video_id,
-                "timestamp_ms": ts,
-                "x1": x, "y1": y, "x2": x + w, "y2": y + h,
-                "label": "pothole",
-                "source_image_id": img_id,
-            })
-
-        for r in d.get("negative_regions", []):
-            x, y, w, h = int(r.get("x", 0)), int(r.get("y", 0)), int(r.get("w", 0)), int(r.get("h", 0))
-            subtype = str(r.get("subtype", "ordinary_road")).strip()
-            raw_items.append({
-                "video_id": video_id,
-                "timestamp_ms": ts,
-                "x1": x, "y1": y, "x2": x + w, "y2": y + h,
-                "label": subtype,
-                "source_image_id": img_id,
-            })
-
-    # Cluster pothole sightings into physical defect IDs
-    potholes = [item for item in raw_items if item["label"] == "pothole"]
-    negatives = [item for item in raw_items if item["label"] != "pothole"]
-
-    potholes.sort(key=lambda x: x["timestamp_ms"])
-    clusters: list[list[dict]] = []
-    for item in potholes:
-        assigned = False
-        icx = (item["x1"] + item["x2"]) / 2.0
-        icy = (item["y1"] + item["y2"]) / 2.0
-        for c in clusters:
-            last = c[-1]
-            if abs(item["timestamp_ms"] - last["timestamp_ms"]) <= 2500:
-                lcx = (last["x1"] + last["x2"]) / 2.0
-                lcy = (last["y1"] + last["y2"]) / 2.0
-                if abs(icx - lcx) < 400 and abs(icy - lcy) < 400:
-                    c.append(item)
-                    assigned = True
-                    break
-        if not assigned:
-            clusters.append([item])
-
-    annotations: list[GroundTruthAnnotation] = []
-    for idx, c in enumerate(clusters, start=1):
-        gt_id = f"gt_defect_{idx:03d}"
-        for item in c:
-            annotations.append(
-                GroundTruthAnnotation(
-                    video_id=item["video_id"],
-                    timestamp_ms=item["timestamp_ms"],
-                    x1=item["x1"], y1=item["y1"], x2=item["x2"], y2=item["y2"],
-                    gt_event_id=gt_id,
-                    label="pothole",
-                    source_image_id=item["source_image_id"],
-                )
-            )
-
-    for idx, item in enumerate(negatives, start=1):
-        annotations.append(
-            GroundTruthAnnotation(
-                video_id=item["video_id"],
-                timestamp_ms=item["timestamp_ms"],
-                x1=item["x1"], y1=item["y1"], x2=item["x2"], y2=item["y2"],
-                gt_event_id=f"gt_negative_{idx:03d}",
-                label=item["label"],
-                source_image_id=item["source_image_id"],
-            )
-        )
-
+        if data.get("review_status") != "reviewed" or data.get("uncertain"):
+            continue
+        if data.get("ground_truth_verified") is not True:
+            raise ValueError(f"{path.name}: physical ground-truth IDs must be human verified (ground_truth_verified=true).")
+        if "timestamp_ms" not in data:
+            raise ValueError(f"{path.name}: explicit timestamp_ms required.")
+        rows = []
+        for label, boxes in (("pothole", data.get("pothole_boxes", [])),
+                             ("negative", data.get("negative_regions", []))):
+            for box in boxes:
+                rows.append({"video_id": video_id, "timestamp_ms": data["timestamp_ms"],
+                             "x": box.get("x"), "y": box.get("y"), "w": box.get("w"), "h": box.get("h"),
+                             "gt_event_id": box.get("gt_event_id", ""),
+                             "label": "pothole" if label == "pothole" else box.get("subtype", "ordinary_road")})
+        import csv, io
+        if rows:
+            out = io.StringIO()
+            writer = csv.DictWriter(out, fieldnames=list(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+            try:
+                annotations.extend(parse_ground_truth_csv(out.getvalue(), video_id))
+            except ValueError as exc:
+                raise ValueError(f"{path.name}: {exc}") from exc
     return annotations
 
 
-def parse_ground_truth_csv(
-    csv_text: str,
-    default_video_id: str = "video_001",
-) -> list[GroundTruthAnnotation]:
-    """Parse a CSV containing ground-truth annotations.
-
-    Expected columns (case-insensitive):
-      video_id (optional), timestamp_ms (or timestamp_sec),
-      x1, y1, x2, y2 (or x, y, w, h),
-      gt_event_id (optional, auto-generated if omitted),
-      label (optional, default 'pothole')
-    """
-    import csv
-    import io
-
-    reader = csv.DictReader(io.StringIO(csv_text))
-    annotations: list[GroundTruthAnnotation] = []
-    for idx, row in enumerate(reader, start=1):
-        r = {k.lower().strip(): v.strip() for k, v in row.items()}
-        vid = r.get("video_id") or default_video_id
-
-        # Timestamps
-        if "timestamp_ms" in r:
-            ts_ms = int(float(r["timestamp_ms"]))
-        elif "timestamp_sec" in r:
-            ts_ms = int(float(r["timestamp_sec"]) * 1000)
-        else:
-            ts_ms = 0
-
-        # Coordinates
-        if "x1" in r and "y1" in r and "x2" in r and "y2" in r:
-            x1, y1, x2, y2 = int(float(r["x1"])), int(float(r["y1"])), int(float(r["x2"])), int(float(r["y2"]))
-        elif "x" in r and "y" in r and "w" in r and "h" in r:
-            x, y, w, h = int(float(r["x"])), int(float(r["y"])), int(float(r["w"])), int(float(r["h"]))
-            x1, y1, x2, y2 = x, y, x + w, y + h
-        else:
-            continue
-
-        label = r.get("label", "pothole") or "pothole"
-        gt_id = r.get("gt_event_id") or f"gt_{ts_ms}_{idx}"
-
-        annotations.append(
-            GroundTruthAnnotation(
-                video_id=vid,
-                timestamp_ms=ts_ms,
-                x1=x1, y1=y1, x2=x2, y2=y2,
-                gt_event_id=gt_id,
-                label=label,
-            )
-        )
+def parse_ground_truth_csv(csv_text: str, default_video_id: str = "video_001") -> list[GroundTruthAnnotation]:
+    """Strict evaluation import. IDs identify physical defects across annotated frames."""
+    import csv, io, math
+    annotations = []
+    for line, row in enumerate(csv.DictReader(io.StringIO(csv_text)), 2):
+        try:
+            r = {k.lower().strip(): (v or "").strip() for k, v in row.items() if k}
+            vid = r.get("video_id") or default_video_id
+            if vid != default_video_id and default_video_id != "video_001":
+                raise ValueError("video_id does not match selected video")
+            raw_ts = r.get("timestamp_ms")
+            ts = float(raw_ts) if raw_ts else float(r["timestamp_sec"]) * 1000
+            if not math.isfinite(ts) or ts < 0:
+                raise ValueError("timestamp must be finite and nonnegative")
+            if all(r.get(k) for k in ("x1", "y1", "x2", "y2")):
+                x1,y1,x2,y2 = [float(r[k]) for k in ("x1", "y1", "x2", "y2")]
+            else:
+                x1,y1,w,h = [float(r[k]) for k in ("x", "y", "w", "h")]
+                x2,y2 = x1+w,y1+h
+            if not all(math.isfinite(v) for v in (x1,y1,x2,y2)) or min(x1,y1)<0 or x2<=x1 or y2<=y1:
+                raise ValueError("invalid bounding box")
+            label = r.get("label") or "pothole"
+            gid = r.get("gt_event_id")
+            if not gid:
+                if label.lower() == "pothole":
+                    raise ValueError("gt_event_id required; reuse the same ID for the same physical pothole")
+                gid = f"negative_row_{line}"
+            annotations.append(GroundTruthAnnotation(video_id=vid, timestamp_ms=int(ts),
+                x1=int(x1),y1=int(y1),x2=int(x2),y2=int(y2),gt_event_id=gid,label=label))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"CSV row {line}: {exc}") from exc
     return annotations
-
-

@@ -21,6 +21,9 @@ import os
 import re
 import sys
 import time
+import uuid
+import shutil
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,7 +37,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Pothole Verification Research Dashboard",
-    page_icon=None,
+    page_icon=":material/road:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -44,41 +47,19 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-/* Metric / KPI Card */
-.kpi-card {
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 8px;
-    padding: 16px 14px 12px;
-    text-align: center;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-.kpi-label {
-    font-size: 0.70rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #64748b;
-    margin-bottom: 4px;
-}
-.kpi-value {
-    font-size: 1.85rem;
-    font-weight: 700;
-    line-height: 1.15;
-    font-feature-settings: "tnum";
-}
-.kpi-value.blue   { color: #2563eb; }
-.kpi-value.green  { color: #16a34a; }
-.kpi-value.amber  { color: #d97706; }
-.kpi-value.red    { color: #dc2626; }
-.kpi-value.slate  { color: #475569; }
-
+/* Use system typography: no remote font request or fragile generated selectors. */
+.block-container { max-width: 1440px; padding-top: 2rem; padding-bottom: 3rem; }
+.kpi-card { border: 1px solid rgba(128,145,165,.25); border-radius: 12px;
+    padding: 20px; text-align: left; background: rgba(128,145,165,.035); }
+.kpi-label { font-size: .75rem; font-weight: 600; letter-spacing: .04em;
+    color: inherit; opacity: .75; margin-bottom: 12px; }
+.kpi-value { font-size: 2rem; font-weight: 650; line-height: 1.15; color: inherit;
+    font-variant-numeric: tabular-nums; }
+.kpi-value.blue { color: #4385e0; }
+.kpi-value.green { color: #279d78; }
+.kpi-value.amber { color: #bd8c30; }
+.kpi-value.red { color: #d46767; }
+.kpi-value.slate { color: inherit; }
 /* Status Badges */
 .status-pill {
     display: inline-block;
@@ -297,7 +278,8 @@ def render_policy_badge(passed: Optional[bool], code: str, score: Optional[float
 # PAGE 1: OVERVIEW
 # ═══════════════════════════════════════════════════════════════════════════
 def page_overview():
-    st.subheader("Overview")
+    st.subheader("Overview", anchor=False)
+    st.caption("ROAD INTELLIGENCE / RESEARCH WORKSPACE")
     db = get_db()
     stats = db.get_summary_stats()
 
@@ -373,27 +355,27 @@ def page_overview():
     unreviewed_count = stats["total_events"] - stats["reviewed"]
     if stats["total_videos"] == 0:
         st.info("No videos processed yet. Go to **Process Video** to analyze a road recording.")
-        if st.button("Go to Process Video", type="primary"):
-            st.session_state["nav_page"] = "Process Video"
+        if st.button("Go to Process Video", icon=":material/upload_file:", type="primary"):
+            st.session_state["pending_nav_page"] = "Process Video"
             st.rerun()
     elif unreviewed_count > 0:
         col_act1, col_act2 = st.columns([4, 1])
         with col_act1:
             st.warning(f"There are **{unreviewed_count} unreviewed candidate events** awaiting inspection.")
         with col_act2:
-            if st.button("Review Events Now", type="primary", use_container_width=True):
-                st.session_state["nav_page"] = "Review Events"
+            if st.button("Review Events Now", icon=":material/fact_check:", type="primary", use_container_width=True):
+                st.session_state["pending_nav_page"] = "Review Events"
                 st.rerun()
     else:
         st.success("All proposed candidate events have been reviewed! You can evaluate results or export reports.")
         col_e1, col_e2 = st.columns(2)
         with col_e1:
             if st.button("View Research Evaluation", use_container_width=True):
-                st.session_state["nav_page"] = "Evaluation"
+                st.session_state["pending_nav_page"] = "Evaluation"
                 st.rerun()
         with col_e2:
             if st.button("Export Results", use_container_width=True):
-                st.session_state["nav_page"] = "Export"
+                st.session_state["pending_nav_page"] = "Export"
                 st.rerun()
 
     # ── Charts Section ──
@@ -439,7 +421,7 @@ def page_overview():
 # ═══════════════════════════════════════════════════════════════════════════
 def page_process():
     st.subheader("Process Video")
-    st.caption("Execute incremental, bounded-memory YOLO candidate detection, BoT-SORT event grouping, and verification.")
+    st.caption("Analyze road footage, inspect candidate potholes, and compare reporting policies.")
     db = get_db()
 
     # ── Step 1: Select or Upload Video ──
@@ -477,9 +459,11 @@ def page_process():
         uploaded = st.file_uploader("Upload video file (.mp4, .mov)", type=["mp4", "mov", "avi"])
         if uploaded:
             LOCAL_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-            save_path = LOCAL_VIDEO_DIR / uploaded.name
-            with open(save_path, "wb") as fh:
-                fh.write(uploaded.read())
+            content = uploaded.getvalue()
+            upload_name = Path(uploaded.name)
+            save_path = LOCAL_VIDEO_DIR / f"{upload_name.stem}_{hashlib.sha256(content).hexdigest()[:12]}{upload_name.suffix.lower()}"
+            if not save_path.exists():
+                save_path.write_bytes(content)
             video_path_final = save_path
             video_id_final = save_path.stem.replace(" ", "_")
             st.success(f"Video saved to `{save_path.relative_to(PROJECT_ROOT)}`")
@@ -631,7 +615,7 @@ def page_process():
     if video_path_final is None:
         st.warning("Please select or upload a valid road video.")
 
-    if st.button("Execute Pipeline", type="primary", disabled=not can_execute, use_container_width=True):
+    if st.button("Execute Pipeline", icon=":material/play_arrow:", type="primary", disabled=not can_execute, use_container_width=True):
         _execute_video_pipeline(
             db=db,
             video_path=video_path_final,
@@ -657,7 +641,7 @@ def page_process():
         with col_cl1:
             confirm_clear = st.checkbox("I understand this will permanently delete all candidate events, reviews, and disk evidence for this video.", key="chk_clear_vid")
         with col_cl2:
-            if st.button("Delete Video Events", type="secondary", disabled=not confirm_clear, use_container_width=True):
+            if st.button("Delete Video Events", icon=":material/delete:", type="secondary", disabled=not confirm_clear, use_container_width=True):
                 if video_id_final:
                     if hasattr(db, "delete_video_data"):
                         db.delete_video_data(video_id_final, clear_reviews=True, reset_status=True)
@@ -668,7 +652,23 @@ def page_process():
                     st.rerun()
 
 
-def _execute_video_pipeline(
+def _execute_video_pipeline(**kwargs):
+    attempt_root = EVIDENCE_ROOT / "runs" / uuid.uuid4().hex
+    try:
+        return _run_video_pipeline(attempt_root=attempt_root, **kwargs)
+    except Exception as exc:
+        published = json.loads((kwargs["db"].get_video(kwargs["video_id"]) or {}).get("run_config") or "{}")
+        if published.get("run_id") != attempt_root.name:
+            shutil.rmtree(attempt_root, ignore_errors=True)
+            message = f"Processing failed: {exc}. Previous successful results and reviews are unchanged."
+        else:
+            message = f"Results were saved, but the completion display failed: {exc}. Reopen Review Events."
+        logger.exception("Video processing failed")
+        st.error(message, icon=":material/error:")
+
+
+def _run_video_pipeline(
+    attempt_root: Path,
     db: Database,
     video_path: Path,
     video_id: str,
@@ -690,14 +690,33 @@ def _execute_video_pipeline(
     meta = get_video_metadata(str(video_path))
     meta["filepath"] = str(video_path)
     meta["road_segment_id"] = road_segment_id
-    db.register_video(video_id, meta)
-
-    # Preserve reviews before deleting events
-    preserved_reviews = db.delete_events_for_video(video_id, clear_reviews=not preserve_reviews)
-    db.mark_processing_started(video_id, {
-        "sample_fps": sample_fps, "model_path": str(model_path),
-        "detector_conf": conf_threshold, "detector_iou": iou_threshold,
-    })
+    if meta.get("error") or not meta.get("duration_sec", 0) > 0:
+        raise ValueError(meta.get("error", "Video must report a positive duration"))
+    run_config = {
+        "run_id": attempt_root.name, "sample_fps": sample_fps,
+        "model_path": str(model_path), "detector_conf": conf_threshold,
+        "detector_iou": iou_threshold, "imgsz": imgsz,
+        "min_obs": policy_b_min_obs, "temporal_window_frames": policy_b_window,
+        "verifier_path": verifier_path, "verifier_threshold": verifier_threshold,
+        "preprocessing_version": "context15-letterbox224-imagenet-v1",
+    }
+    def checkpoint_hash(path):
+        if not path:
+            return None
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    import importlib.metadata
+    run_config["packages"] = {}
+    for package in ("streamlit", "ultralytics", "torch", "torchvision", "numpy"):
+        try:
+            run_config["packages"][package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            run_config["packages"][package] = "not installed"
+    run_config["detector_sha256"] = checkpoint_hash(model_path)
+    run_config["verifier_sha256"] = checkpoint_hash(verifier_path)
 
     t0 = time.time()
     device = auto_device()
@@ -721,7 +740,9 @@ def _execute_video_pipeline(
         prog_bar = st.progress(0.0)
         prog_text = st.empty()
 
+        actual_frames = [0]
         def on_prog(fi, tot):
+            actual_frames[0] = fi
             fraction = min(1.0, fi / expected)
             prog_bar.progress(fraction)
             elapsed = time.time() - t0
@@ -736,7 +757,7 @@ def _execute_video_pipeline(
             iou=iou_threshold,
             imgsz=imgsz,
             device=device,
-            evidence_root=EVIDENCE_ROOT,
+            evidence_root=attempt_root,
             video_path=video_path,
             generate_clips=generate_clips,
             total_expected_frames=expected,
@@ -776,14 +797,12 @@ def _execute_video_pipeline(
 
         # Persist
         st.write("5. Persisting events to SQLite database...")
-        db.save_events(events)
-        reattached = 0
-        if preserved_reviews:
-            reattached = db.reattach_preserved_reviews(video_id, preserved_reviews)
-            if reattached:
-                st.write(f"Re-attached **{reattached} human review decisions** via spatiotemporal matching.")
-
-        db.mark_processing_done(video_id, expected)
+        run_config["tracker"] = events[0].tracker_config if events else grouper._tracker_config_snapshot()
+        run_config["status"] = "complete"
+        transfer = db.replace_completed_run(video_id, meta, events, run_config,
+                                            actual_frames[0], preserve_reviews)
+        if preserve_reviews:
+            st.write(f"Reviews transferred heuristically: {transfer['transferred']}; unmatched: {transfer['unmatched']}. Previous reviews remain in the run archive.")
         elapsed_total = time.time() - t0
         status.update(label=f"Completed in {elapsed_total:.1f}s! ({len(events)} events generated)", state="complete", expanded=False)
 
@@ -797,8 +816,8 @@ def _execute_video_pipeline(
         f"{sum_res['policy_c_retained']} / {sum_res['policy_c_scored']}" if verifier.is_configured() else "Unavailable",
     )
 
-    if st.button("Proceed to Review Events", type="primary"):
-        st.session_state["nav_page"] = "Review Events"
+    if st.button("Proceed to Review Events", icon=":material/fact_check:", type="primary"):
+        st.session_state["pending_nav_page"] = "Review Events"
         st.rerun()
 
 
@@ -820,7 +839,7 @@ def page_review_events():
     with f3:
         sel_policy = st.selectbox(
             "Policy Filter",
-            ["All candidates", "Policy A retained", "Policy B retained", "Policy C retained", "Filtered by Policy A", "Filtered by Policy B"],
+            ["All candidates", "Policy A retained", "Policy B retained", "Policy C retained", "Filtered by Policy A", "Filtered by Policy B", "Filtered by Policy C", "Policy C unavailable"],
             key="rev_filter_policy",
         )
     with f4:
@@ -841,7 +860,9 @@ def page_review_events():
     vid_filter_arg = None if sel_video == "All videos" else sel_video
     all_events = db.get_events(video_id=vid_filter_arg, include_reviews=True)
 
-    filtered_events = list(all_events)
+    segments = sorted({e["road_segment_id"] for e in all_events})
+    segment = st.selectbox("Road segment", ["All segments"] + segments, key="rev_segment")
+    filtered_events = [e for e in all_events if segment == "All segments" or e["road_segment_id"] == segment]
 
     if search_id:
         filtered_events = [e for e in filtered_events if search_id.lower() in e["event_id"].lower()]
@@ -856,6 +877,11 @@ def page_review_events():
         filtered_events = [e for e in filtered_events if not e.get("policy_a_retained")]
     elif sel_policy == "Filtered by Policy B":
         filtered_events = [e for e in filtered_events if not e.get("policy_b_retained")]
+
+    elif sel_policy == "Filtered by Policy C":
+        filtered_events = [e for e in filtered_events if e.get("policy_c_retained") == 0]
+    elif sel_policy == "Policy C unavailable":
+        filtered_events = [e for e in filtered_events if e.get("policy_c_retained") is None]
 
     if sel_rev_status != "All":
         target = sel_rev_status.lower().replace(" ", "_")
@@ -915,9 +941,9 @@ def page_review_events():
             index=selected_index,
             format_func=lambda eid: format_event_label(event_map[eid]),
             label_visibility="collapsed",
-            key="radio_selected_event",
+            key="selected_event_id",
         )
-        st.session_state["selected_event_id"] = selected_id
+        # Radio is bound directly to selected_event_id.
 
     # ── Detail Panel ──
     with col_detail:
@@ -927,6 +953,10 @@ def page_review_events():
 
 def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict]):
     eid = ev["event_id"]
+    if st.session_state.get("pending_clear_event") == eid:
+        for prefix in ("widget_dec_", "widget_fp_", "widget_notes_"):
+            st.session_state.pop(prefix + eid, None)
+        st.session_state.pop("pending_clear_event", None)
     vid = ev["video_id"]
     review = ev.get("review") or {}
     cur_dec = review.get("decision", "unreviewed")
@@ -944,12 +974,12 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
     with col_nav:
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("Previous", disabled=(cur_idx == 0), use_container_width=True, key=f"btn_prev_{eid}"):
-                st.session_state["selected_event_id"] = candidate_list[cur_idx - 1]["event_id"]
+            if st.button("Previous", icon=":material/chevron_left:", disabled=(cur_idx == 0), use_container_width=True, key=f"btn_prev_{eid}"):
+                st.session_state["pending_selected_event_id"] = candidate_list[cur_idx - 1]["event_id"]
                 st.rerun()
         with nc2:
-            if st.button("Next", disabled=(cur_idx >= len(candidate_list) - 1), use_container_width=True, key=f"btn_next_{eid}"):
-                st.session_state["selected_event_id"] = candidate_list[cur_idx + 1]["event_id"]
+            if st.button("Next", icon=":material/chevron_right:", disabled=(cur_idx >= len(candidate_list) - 1), use_container_width=True, key=f"btn_next_{eid}"):
+                st.session_state["pending_selected_event_id"] = candidate_list[cur_idx + 1]["event_id"]
                 st.rerun()
 
     st.write("")
@@ -961,14 +991,14 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
     full_path = ev.get("full_frame_path")
 
     with col_crop:
-        st.caption("15% Padded Verifier Crop (Laplacian-sharpest of top 3 conf)")
+        st.caption("Selected evidence crop")
         if crop_path and Path(crop_path).exists():
             st.image(crop_path, use_container_width=True)
         else:
             st.info("No crop image file found.")
 
     with col_frame:
-        st.caption("Full Frame Evidence Context")
+        st.caption("Full frame context")
         if full_path and Path(full_path).exists():
             st.image(full_path, use_container_width=True)
         else:
@@ -984,7 +1014,7 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
             st.caption(f"Playing from ~{start_sec}s (2s before observation at {fmt_ts_full(rep_ts)}).")
 
     # ── Spatiotemporal & Model Metadata ──
-    st.markdown('<div class="section-hdr">Spatiotemporal & Model Metadata</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-hdr">Event details</div>', unsafe_allow_html=True)
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         st.caption("Observation Interval")
@@ -1010,6 +1040,8 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
             st.write("**Unavailable**")
             st.caption("Verifier not evaluated")
 
+    config = json.loads((vrow or {}).get("run_config") or "{}")
+    unknown = "Unknown—legacy run"
     # ── Policy Outcome Explanations ──
     st.markdown('<div class="section-hdr">Reporting Policies Breakdown</div>', unsafe_allow_html=True)
     p_a_html = render_policy_badge(bool(ev.get("policy_a_retained")), "A — Detector Only")
@@ -1020,12 +1052,14 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
     st.markdown(f"{p_a_html} &nbsp; {p_b_html} &nbsp; {p_c_html}", unsafe_allow_html=True)
 
     st.markdown(f"""
-    <div style="font-size:0.83rem;color:#475569;margin-top:6px;">
-      • <strong>Policy A:</strong> Detector confidence {cmax:.3f} &ge; threshold &rarr; {'PASS' if ev.get('policy_a_retained') else 'FILTERED'}<br/>
-      • <strong>Policy B:</strong> &ge;2 actual detections within 5-frame sliding window &rarr; {'PASS' if ev.get('policy_b_retained') else 'FILTERED'} ({ev['observation_count']} observations)<br/>
-      • <strong>Policy C:</strong> {'Score ' + f'{pscore:.3f}' if pscore is not None else 'Unavailable (checkpoint not loaded)'} &rarr; {'PASS' if ev.get('policy_c_retained') else 'FILTERED/UNAVAILABLE'}
+    <div style="font-size:0.83rem;color:inherit;margin-top:6px;">
+      • <strong>Policy A:</strong> Detector confidence {cmax:.3f}; threshold {config.get("detector_conf", unknown)} &rarr; {'PASS' if ev.get('policy_a_retained') else 'FILTERED'}<br/>
+      • <strong>Policy B:</strong> {config.get("min_obs", unknown)} required detections within {config.get("temporal_window_frames", unknown)} sampled frames &rarr; {'PASS' if ev.get('policy_b_retained') else 'FILTERED'} ({ev['observation_count']} observations)<br/>
+      • <strong>Policy C:</strong> {'Score ' + f'{pscore:.3f}' if pscore is not None else 'Unavailable (no valid score)'} &rarr; {'PASS' if ev.get('policy_c_retained') else 'FILTERED/UNAVAILABLE'}
     </div>
     """, unsafe_allow_html=True)
+
+    st.caption(f"Verifier threshold: {config.get('verifier_threshold', unknown)} · Run: {config.get('run_id', unknown)}")
 
     # ── Human Review Controls ──
     st.markdown('<div class="section-hdr">Human Review Decision</div>', unsafe_allow_html=True)
@@ -1054,7 +1088,7 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
             fp_options = ["", "shadow", "repaired_patch", "manhole", "ordinary_road", "other"]
             fp_idx = fp_options.index(cur_fp) if cur_fp in fp_options else 0
             new_fp = st.selectbox(
-                "Rejection Subtype (if rejected)",
+                "Rejection category",
                 options=fp_options,
                 index=fp_idx,
                 disabled=(new_decision != "rejected"),
@@ -1074,32 +1108,33 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
 
         rc1, rc2, rc3 = st.columns(3)
         with rc1:
-            if st.button("Save Decision", type="primary", use_container_width=True, key=f"btn_save_{eid}"):
+            if st.button("Save Decision", icon=":material/check:", type="primary", use_container_width=True, key=f"btn_save_{eid}"):
                 if new_decision == "unreviewed":
                     db.delete_review(eid)
                 else:
-                    db.save_review(eid, new_decision, new_fp or None, new_notes)
+                    db.save_review(eid, new_decision, (new_fp or None) if new_decision == "rejected" else None, new_notes)
                 st.session_state["review_saved_msg"] = f"Saved decision for {eid}."
                 st.rerun()
 
         with rc2:
-            if st.button("Save & Next Unreviewed", use_container_width=True, key=f"btn_save_next_{eid}"):
+            if st.button("Save & Next Unreviewed", icon=":material/playlist_add_check:", use_container_width=True, key=f"btn_save_next_{eid}"):
                 if new_decision == "unreviewed":
                     db.delete_review(eid)
                 else:
-                    db.save_review(eid, new_decision, new_fp or None, new_notes)
+                    db.save_review(eid, new_decision, (new_fp or None) if new_decision == "rejected" else None, new_notes)
 
                 # Find next unreviewed candidate
                 all_evs = db.get_events(video_id=vid, include_reviews=True)
                 next_unrev = [e["event_id"] for e in all_evs if e.get("review") is None and e["event_id"] != eid]
                 if next_unrev:
-                    st.session_state["selected_event_id"] = next_unrev[0]
+                    st.session_state["pending_selected_event_id"] = next_unrev[0]
                 st.session_state["review_saved_msg"] = f"Saved {eid} and advanced."
                 st.rerun()
 
         with rc3:
-            if st.button("Clear Review", use_container_width=True, key=f"btn_clear_{eid}"):
+            if st.button("Clear Review", icon=":material/undo:", use_container_width=True, key=f"btn_clear_{eid}"):
                 db.delete_review(eid)
+                st.session_state["pending_clear_event"] = eid
                 st.session_state["review_notes_draft"].pop(eid, None)
                 st.session_state["review_saved_msg"] = f"Cleared review for {eid}."
                 st.rerun()
@@ -1141,18 +1176,26 @@ def page_evaluation():
     gt_annotations: list[GroundTruthAnnotation] = []
 
     if gt_source.startswith("Local"):
-        gt_annotations = load_video_ground_truth(sel_eval_vid, project_root=PROJECT_ROOT)
+        try:
+            gt_annotations = load_video_ground_truth(sel_eval_vid, project_root=PROJECT_ROOT)
+        except ValueError as exc:
+            st.error(str(exc), icon=":material/error:")
+            return
         if gt_annotations:
             num_potholes = len(set(g.gt_event_id for g in gt_annotations if g.is_pothole))
             num_boxes = len([g for g in gt_annotations if g.is_pothole])
-            st.success(f"Loaded **{len(gt_annotations)} ground-truth annotations** for `{sel_eval_vid}`: **{num_potholes} unique physical potholes** ({num_boxes} multi-frame bounding boxes clustered).")
+            st.success(f"Loaded **{len(gt_annotations)} ground-truth annotations** for `{sel_eval_vid}`: **{num_potholes} verified physical potholes** ({num_boxes} annotated boxes).")
         else:
             st.warning(f"No local ground-truth JSON files found matching `{sel_eval_vid}` in `data/annotations/video/`.")
     else:
         uploaded_csv = st.file_uploader("Upload Ground Truth CSV", type=["csv"], key="eval_gt_csv")
         if uploaded_csv:
             csv_content = uploaded_csv.read().decode("utf-8")
-            gt_annotations = parse_ground_truth_csv(csv_content, default_video_id=sel_eval_vid)
+            try:
+                gt_annotations = parse_ground_truth_csv(csv_content, default_video_id=sel_eval_vid)
+            except ValueError as exc:
+                st.error(str(exc), icon=":material/error:")
+                return
             num_potholes = len(set(g.gt_event_id for g in gt_annotations if g.is_pothole))
             st.success(f"Parsed {len(gt_annotations)} ground-truth records ({num_potholes} unique physical potholes).")
 
@@ -1180,14 +1223,29 @@ def page_evaluation():
     with ec1:
         eval_iou = st.slider("Spatial IoU Threshold (Matching)", 0.20, 0.80, 0.50, 0.05, help="Primary spatial overlap threshold (standard 0.50).")
     with ec2:
-        temporal_tol = st.slider("Temporal Tolerance Δt (ms)", 500, 3000, 1500, 250, help="Maximum timestamp offset allowed between detection and GT.")
+        temporal_tol = st.slider("Temporal Tolerance Δt (ms)", 0, 3000, 0, 50, help="Default: exact timestamps. Increase only when justified by annotation cadence.")
     with ec3:
         vmeta = db.get_video(sel_eval_vid) or {}
-        default_dur = (vmeta.get("duration_sec") or 60.0) / 60.0
-        eval_dur_min = st.number_input("Video Duration (minutes)", min_value=0.1, value=float(default_dur), step=0.1)
+        duration = vmeta.get("duration_sec")
+        if not duration or duration <= 0:
+            st.error("Verified positive video duration is required. Reprocess the source video.")
+            return
+        eval_dur_min = duration / 60.0
+        st.metric("Source duration", f"{eval_dur_min:.3f} min")
 
+    justification = st.text_input("Alignment tolerance justification", placeholder="Required when using a nonzero tolerance") if temporal_tol else "Exact timestamps"
+    if temporal_tol and not justification.strip():
+        st.info("Document why timestamp tolerance is required before scoring.")
+        return
     # ── Run Evaluation on Policy A, Policy B, and Policy C ──
-    all_events = db.get_events(video_id=sel_eval_vid, include_reviews=False)
+    split = st.selectbox("Evaluation split", ["Unspecified", "Validation", "Held-out test"])
+    verified = st.checkbox("I verified physical pothole IDs, complete video coverage, and annotation/video alignment.")
+    frozen = st.checkbox("Thresholds were frozen before inspecting held-out test results.") if split == "Held-out test" else True
+    st.caption("CSV IDs and timestamps are user-supplied ground truth. Legacy training annotations are not automatically eligible for scoring.")
+    if not verified or split == "Unspecified" or not frozen:
+        st.info("Confirm ground-truth coverage and select the evaluation split to calculate metrics.")
+        return
+    all_events = [db.get_event(e["event_id"]) for e in db.get_events(video_id=sel_eval_vid, include_reviews=False)]
     events_a = [e for e in all_events if e.get("policy_a_retained")]
     events_b = [e for e in all_events if e.get("policy_b_retained")]
     events_c = [e for e in all_events if e.get("policy_c_retained")]
@@ -1195,7 +1253,11 @@ def page_evaluation():
     res_a = evaluate_event_detections(events_a, gt_annotations, video_duration_min=eval_dur_min, iou_threshold=eval_iou, temporal_tolerance_ms=temporal_tol)
     res_b = evaluate_event_detections(events_b, gt_annotations, video_duration_min=eval_dur_min, iou_threshold=eval_iou, temporal_tolerance_ms=temporal_tol)
 
-    has_c = any(e.get("policy_c_retained") is not None for e in all_events)
+    scored = sum(e.get("policy_c_score") is not None for e in all_events)
+    has_c = bool(all_events) and scored == len(all_events)
+    st.caption(f"Visual verifier coverage: {scored}/{len(all_events)} candidates scored; {len(all_events)-scored} unavailable.")
+    if not has_c:
+        st.warning("Policy C comparison unavailable: complete verifier coverage is required.")
     res_c = evaluate_event_detections(events_c, gt_annotations, video_duration_min=eval_dur_min, iou_threshold=eval_iou, temporal_tolerance_ms=temporal_tol) if has_c else None
 
     st.markdown('<div class="section-hdr">Comparative Policy Evaluation (A vs. B vs. C)</div>', unsafe_allow_html=True)
@@ -1295,6 +1357,8 @@ def page_export():
     st.caption("Download structured research CSV reports containing all model predictions, timestamps, evidence paths, and human review decisions.")
     db = get_db()
 
+    st.download_button("Download previous run archive", get_db().export_run_archive(),
+                       "run_archive.json", "application/json", icon=":material/history:")
     tab_report, tab_crops = st.tabs(["Event Report Export", "Verifier Crop Inventory Export"])
 
     with tab_report:
@@ -1341,7 +1405,7 @@ def page_export():
                 "policy_c_score", "policy_c_retained",
                 "full_frame_path", "crop_path", "clip_path",
                 "review_decision", "fp_category", "reviewer_notes", "reviewed_at",
-                "model_path", "model_version", "sample_fps", "detector_conf", "created_at",
+                "model_path", "model_version", "sample_fps", "detector_conf", "run_config", "created_at",
             ]
 
             buf = io.StringIO()
@@ -1357,6 +1421,7 @@ def page_export():
                     "fp_category": rev.get("fp_category", ""),
                     "reviewer_notes": rev.get("reviewer_notes", ""),
                     "reviewed_at": rev.get("reviewed_at", ""),
+                    "run_config": vmeta.get("run_config", ""),
                     "model_path": vmeta.get("model_path", ""),
                     "model_version": vmeta.get("model_version", ""),
                     "sample_fps": vmeta.get("sample_fps", ""),
@@ -1439,9 +1504,14 @@ PAGES = {
 
 
 def main():
+    for key in ("nav_page", "selected_event_id"):
+        pending = st.session_state.pop(f"pending_{key}", None)
+        if pending is not None:
+            st.session_state[key] = pending
     with st.sidebar:
-        st.markdown("### Pothole Verification")
-        st.caption("Visual Verification & Spatiotemporal Analysis")
+        st.markdown("### RoadLens")
+        st.caption("POTHOLE VERIFICATION")
+        st.caption("Detection · Verification · Review")
         st.divider()
 
         # Navigation
@@ -1453,10 +1523,11 @@ def main():
             "Primary Navigation",
             options=page_names,
             index=idx,
-            key="sidebar_nav_radio",
+            key="nav_page",
             label_visibility="collapsed",
+            format_func=lambda page: {"Overview": ":material/dashboard: Overview", "Process Video": ":material/video_file: Process Video", "Review Events": ":material/fact_check: Review Events", "Evaluation": ":material/analytics: Evaluation", "Export": ":material/download: Export"}[page],
         )
-        st.session_state["nav_page"] = selected_page
+        # Radio is bound directly to nav_page.
 
         st.divider()
 
