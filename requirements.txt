@@ -16,7 +16,6 @@ urllib3>=2.0
 
 # Annotation dashboard
 streamlit>=1.45
-streamlit-drawable-canvas>=0.9.3
 
 # Utilities
 pyyaml>=6.0
