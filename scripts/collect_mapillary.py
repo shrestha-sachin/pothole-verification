@@ -291,6 +291,7 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--image-id", help="Known Mapillary image ID")
     mode.add_argument("--bbox", help="west,south,east,north (small area only)")
+    mode.add_argument("--manifest", help="Path to manifest.csv to download all listed images")
     parser.add_argument("--sequence", action="store_true", help="Select nearby frames from the seed's sequence")
     parser.add_argument("--limit", type=int, default=30)
     parser.add_argument("--radius-m", type=float, default=250, help="Max distance from seed in meters")
@@ -316,10 +317,34 @@ def main():
             "Get your token at: https://www.mapillary.com/dashboard/developers"
         )
 
-    output = Path(args.output)
-    output.mkdir(parents=True, exist_ok=True)
     session = make_session(token)
     try:
+        if args.manifest:
+            manifest_p = Path(args.manifest)
+            if not manifest_p.exists():
+                parser.error(f"Manifest not found: {manifest_p}")
+            out_dir = Path(args.output) if args.output != "data/raw/mapillary/segment_001" else manifest_p.parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            with manifest_p.open(newline="", encoding="utf-8") as f:
+                records = list(csv.DictReader(f))
+            print(f"Reading {len(records)} records from {manifest_p}...")
+            count = 0
+            for r in records:
+                img_id = r.get("image_id")
+                if not img_id:
+                    continue
+                try:
+                    info = get_image(session, img_id)
+                    row = download(session, info, r.get("distance_from_seed_m", ""), out_dir)
+                    if row:
+                        count += 1
+                except (requests.RequestException, RuntimeError, OSError) as error:
+                    print(f"Failed image {img_id}: {type(error).__name__}: {error}")
+            print(f"Finished: {count} images present in {out_dir / 'images'}")
+            return
+
+        output = Path(args.output)
+        output.mkdir(parents=True, exist_ok=True)
         if args.image_id and args.sequence:
             selected = nearby_sequence_images(
                 session, args.image_id, args.limit, args.radius_m,
