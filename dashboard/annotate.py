@@ -4,11 +4,13 @@ import base64
 import csv
 import io
 import sys
+import os
+import tempfile
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image
+from PIL import Image, ImageDraw
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -156,7 +158,8 @@ with nav:
 
 path = PROJECT_ROOT / row['filepath']
 try:
-    image_data,width,height = preview(str(path),path.stat().st_mtime_ns)
+    frame_modified = path.stat().st_mtime_ns
+    image_data,width,height = preview(str(path),frame_modified)
 except (OSError,ValueError) as exc:
     st.error(f'Cannot open source image: {exc}', icon=':material/broken_image:'); st.stop()
 annotation.update(image_width=width,image_height=height)
@@ -193,7 +196,85 @@ def editor():
         st.error('Box edits are not saved. Resolve the storage error, then use Retry save in the editor.')
 
 
-editor()
+def save_redacted_frame(path, boxes, width, height, expected_mtime):
+    """Atomically replace the extracted frame using its original image format."""
+    if path.stat().st_mtime_ns != expected_mtime:
+        raise ValueError("The frame changed. Reopen it before saving.")
+    with Image.open(path) as source:
+        image_format = source.format
+        frame = source.convert('RGB')
+    frame.info.clear()
+    if frame.size != (width, height):
+        raise ValueError('The source dimensions changed. Reopen the frame before saving.')
+    masks = apply_editor_boxes({}, boxes, width, height)['pothole_boxes']
+    draw = ImageDraw.Draw(frame)
+    for box in masks:
+        x, y, w, h = (box[field] for field in ('x', 'y', 'w', 'h'))
+        draw.rectangle((x, y, x + w - 1, y + h - 1), fill='black')
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            options = {'quality': 95, 'subsampling': 0} if image_format == 'JPEG' else {}
+            frame.save(temporary, format=image_format, **options)
+        if path.stat().st_mtime_ns != expected_mtime:
+            raise ValueError('The frame changed during saving. Reopen it before saving again.')
+        os.chmod(temporary_path, path.stat().st_mode & 0o777)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+
+@st.fragment
+def plate_redaction():
+    st.caption(
+        'Draw a box over each readable plate. Saving permanently applies the masks '
+        'to this image file at its original size.'
+    )
+    mask_key = 'plate_masks_' + chosen
+    draft = st.session_state.get(mask_key, {'revision': 0, 'boxes': []})
+    frame_id = f'plate:{chosen}:{frame_modified}'
+    if draft.get('image_id') != frame_id:
+        draft = {'revision': 0, 'boxes': []}
+    payload = canvas_component(
+        image_id=frame_id, image=image_data, width=width, height=height,
+        boxes=draft['boxes'], revision=draft['revision'], privacy=True,
+        key='plate_editor_' + chosen, default=None,
+    )
+    if payload and payload.get('image_id') == frame_id and payload['revision'] > draft['revision']:
+        try:
+            apply_editor_boxes({}, payload['boxes'], width, height)
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        draft = payload
+        st.session_state[mask_key] = draft
+        # The next component render acknowledges the edit without replacing the canvas.
+        try:
+            st.rerun(scope='fragment')
+        except st.errors.StreamlitAPIException:
+            st.rerun()
+
+    if st.session_state.pop('plate_saved_' + chosen, False):
+        st.success('Redactions saved to the existing image file.')
+    if st.button('Save redactions to this frame', disabled=not draft['boxes'],
+                 icon=':material/shield:', key='plate_save_' + chosen):
+        try:
+            save_redacted_frame(path, draft['boxes'], width, height, frame_modified)
+        except (OSError, ValueError) as exc:
+            st.error(f'Could not save the frame. {exc}')
+        else:
+            st.session_state.pop(mask_key, None)
+            st.session_state['plate_saved_' + chosen] = True
+            st.rerun()
+
+
+if st.toggle('Redact license plates', key='plate_redaction_mode'):
+    plate_redaction()
+else:
+    editor()
 
 st.divider()
 st.markdown('#### Complete image review')
