@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -242,8 +243,50 @@ def build_inventory(dry_run: bool = False) -> None:
 
         w, h_px = image_dims(p)
 
-        # Preserve any labels already saved in the existing inventory
+        # Check disk annotation first (source of truth), then existing inventory row, then defaults
+        ann_sub = "video" if image_id.startswith(("vid_", "frame_")) else "green_bay"
+        ann_path = PROJECT_ROOT / "data" / "annotations" / ann_sub / f"{image_id}.json"
+        ann = {}
+        if ann_path.exists():
+            try:
+                with ann_path.open(encoding="utf-8") as afh:
+                    ann = json.load(afh)
+            except Exception as exc:
+                print(f"  WARNING: failed reading annotation for {image_id}: {exc}")
+
         prev = existing.get(image_id, {})
+        review_status = (
+            ann.get("review_status")
+            or prev.get("review_status")
+            or REVIEW_DEFAULT
+        )
+        if "pothole_boxes" in ann:
+            pothole_count = str(len(ann.get("pothole_boxes", [])))
+        else:
+            pothole_count = prev.get("pothole_count", "")
+
+        shadows_present = (
+            str(ann.get("shadows_present", False)).lower()
+            if "shadows_present" in ann
+            else prev.get("shadows_present", "")
+        )
+        patches_present = (
+            str(ann.get("patches_present", False)).lower()
+            if "patches_present" in ann
+            else prev.get("patches_present", "")
+        )
+        manholes_present = (
+            str(ann.get("manholes_present", False)).lower()
+            if "manholes_present" in ann
+            else prev.get("manholes_present", "")
+        )
+        uncertain = (
+            str(ann.get("uncertain", False)).lower()
+            if "uncertain" in ann
+            else prev.get("uncertain", "")
+        )
+        notes = ann.get("notes") if "notes" in ann and ann.get("notes") is not None else prev.get("notes", "")
+
         row: dict = {
             "image_id": image_id,
             "original_filename": p.name,
@@ -256,13 +299,13 @@ def build_inventory(dry_run: bool = False) -> None:
             "sequence_id": entry["sequence_id"],
             "recording_id": entry["recording_id"],
             "split": prev.get("split", "pilot"),   # default: pilot evaluation set
-            "review_status": prev.get("review_status", REVIEW_DEFAULT),
-            "pothole_count": prev.get("pothole_count", ""),
-            "shadows_present": prev.get("shadows_present", ""),
-            "patches_present": prev.get("patches_present", ""),
-            "manholes_present": prev.get("manholes_present", ""),
-            "uncertain": prev.get("uncertain", ""),
-            "notes": prev.get("notes", ""),
+            "review_status": review_status,
+            "pothole_count": pothole_count,
+            "shadows_present": shadows_present,
+            "patches_present": patches_present,
+            "manholes_present": manholes_present,
+            "uncertain": uncertain,
+            "notes": notes,
         }
         rows.append(row)
 

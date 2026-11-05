@@ -250,6 +250,42 @@ def save_manifest(output, new_rows):
     return len(records)
 
 
+def extract_image_id(text: str) -> str:
+    """Extract numeric image key (pKey) if a full Mapillary URL is passed."""
+    if not text:
+        return text
+    text = text.strip()
+    if "pkey=" in text.lower() or "image_id=" in text.lower():
+        from urllib.parse import parse_qs, urlsplit
+        parsed = urlsplit(text)
+        qs = parse_qs(parsed.query)
+        for key in ["pKey", "pkey", "image_id"]:
+            if key in qs and qs[key]:
+                return qs[key][0]
+    return text
+
+
+def load_mapillary_token() -> str | None:
+    """Read MAPILLARY_TOKEN from environment or .env file."""
+    token = os.getenv("MAPILLARY_TOKEN")
+    if token:
+        return token.strip()
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        with env_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#") or not line:
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    if k.strip() == "MAPILLARY_TOKEN":
+                        t = v.strip().strip('"').strip("'")
+                        if t and t != "your_token_here":
+                            return t
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -267,9 +303,18 @@ def main():
         parser.error("--sequence requires --image-id")
     if args.limit < 1 or args.max_scan < 1 or args.max_pages < 1 or args.radius_m <= 0:
         parser.error("--limit, --max-scan, --max-pages, and --radius-m must be positive")
-    token = os.getenv("MAPILLARY_TOKEN")
+
+    if args.image_id:
+        args.image_id = extract_image_id(args.image_id)
+        print(f"Target Mapillary image ID: {args.image_id}")
+
+    token = load_mapillary_token()
     if not token:
-        parser.error("Set MAPILLARY_TOKEN in your terminal before running")
+        parser.error(
+            "Missing MAPILLARY_TOKEN. Set MAPILLARY_TOKEN in your terminal or add it to .env:\n"
+            "  MAPILLARY_TOKEN=your_token_here\n"
+            "Get your token at: https://www.mapillary.com/dashboard/developers"
+        )
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)

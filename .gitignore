@@ -5,17 +5,25 @@
 # ---------------------------------------------------------------------------
 # Raw image and video data (large binary files — do not commit)
 # ---------------------------------------------------------------------------
-# Ignore the image/video subdirectories but allow manifests and stubs
+# Comprehensive raw image protection across all subdirectories
+data/raw/**/*.jpg
+data/raw/**/*.jpeg
+data/raw/**/*.png
+data/raw/**/*.webp
 data/raw/mapillary/*/images/
-data/raw/local_video/*.mp4
-data/raw/local_video/*.mov
-data/raw/local_video/*.avi
-data/raw/local_video/*.mkv
-data/raw/local_video/*.MP4
-data/raw/local_video/*.MOV
+
+# Video files (all video containers)
+data/raw/local_video/*
+!data/raw/local_video/.gitkeep
 data/raw/green_bay_images/
 data/raw/rdd2022/
 data/raw/RDD2022/
+
+# Partial and temporary download artifacts
+*.part
+*.tmp
+data/raw/**/*.part
+data/raw/**/*.tmp
 
 # ---------------------------------------------------------------------------
 # Backups (internal safety copies — do not commit)
