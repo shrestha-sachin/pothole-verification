@@ -302,3 +302,52 @@ pothole-verification/
 | `*.pt`, `*.pth` | Model weights |
 | `.venv/` | Virtual environment |
 | `.env` | Secrets |
+
+
+## Dashboard safety and evaluation workflow
+
+Start the research dashboard with `python -m streamlit run dashboard/app.py`.
+Streamlit 1.45 or newer is required for native Material icons. The interface uses
+system typography, a neutral light theme, and explicit text status labels. Users
+can select another Streamlit theme from Settings.
+
+Replacement runs write evidence to unique `results/evidence/runs/<run_id>/`
+directories. Existing events and reviews remain active until the replacement
+completes and its database transaction commits. Previous records, observations,
+review decisions and evidence references are retained in `run_archive` and can
+be downloaded as JSON from Export. Evidence files from archived runs are retained;
+archive downloads contain references, not the image/video bytes. Review transfer
+uses timestamp proximity and IoU >= 0.5, with each new event assigned at most one
+old review. This is heuristic: inspect transferred decisions before research use.
+
+Evaluation JSON must include exact `video_id`, numeric `timestamp_ms`,
+`review_status: "reviewed"`, and `ground_truth_verified: true`. Each pothole box
+must have a human-verified `gt_event_id`. Reuse that ID for all sightings of the
+same physical pothole. Legacy frame annotations are still training data but are
+not automatically scored as evaluation ground truth. Filename guesses and
+unverified automatic clustering are no longer accepted.
+
+CSV evaluation requires timestamps, boxes, and `gt_event_id` for potholes. An
+explicit `video_id`, when supplied, must equal the selected video's ID. The UI
+requires confirmation of full-video annotation coverage, a validation/test split,
+and frozen thresholds for held-out tests. Timestamp matching defaults to exact
+alignment; a nonzero tolerance requires a documented justification. Policy C
+headline metrics require every candidate to have a verifier score. Predictions
+and human reviews remain separate.
+
+Run settings (including checkpoint SHA-256 identities, sampling and policy
+thresholds) are saved in `videos.run_config` and included in event CSV exports.
+Legacy settings are displayed as unknown rather than inferred.
+
+### Focused regression checks
+
+Install development test support with `python -m pip install pytest` and run:
+
+```bash
+python -m pytest tests/test_run_safety.py tests/test_dashboard_flows.py tests/test_database_cleanup.py tests/test_event_evaluation.py tests/test_rdd2022_conversion.py tests/test_ground_truth_loader.py tests/test_policies.py tests/test_evidence_and_crop.py -q
+```
+
+Synthetic model services exercise detector, processing, verifier and persistence
+failure paths without downloading checkpoints or starting training. Streamlit
+AppTest covers navigation and review controls. These tests do not establish real
+model accuracy or replace a visual browser check on your own footage.
