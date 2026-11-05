@@ -1,0 +1,31 @@
+image_id,split,tier,d20_count,d10_count,d00_count,total_crack_boxes,classes_str
+United_States_004029,train,Tier 1: D20 (alligator) + D10 (transverse),1,1,1,3,D00+D10+D20
+United_States_001241,train,Tier 1: D20 (alligator) + D10 (transverse),1,1,2,4,D00+D10+D20
+United_States_000135,train,Tier 1: D20 (alligator) + D10 (transverse),1,1,1,3,D00+D10+D20
+United_States_003286,train,Tier 1: D20 (alligator) + D10 (transverse),2,1,1,4,D00+D10+D20
+United_States_004580,train,Tier 1: D20 (alligator) + D10 (transverse),1,2,0,3,D10+D20
+United_States_002911,train,Tier 1: D20 (alligator) + D10 (transverse),1,3,0,4,D10+D20
+United_States_004002,train,Tier 1: D20 (alligator) + D10 (transverse),1,1,0,2,D10+D20
+United_States_003100,train,Tier 1: D20 (alligator) + D10 (transverse),1,3,0,4,D10+D20
+United_States_002830,train,Tier 1: D20 (alligator) + D10 (transverse),3,2,0,5,D10+D20
+United_States_001247,train,Tier 1: D20 (alligator) + D10 (transverse),1,1,2,4,D00+D10+D20
+United_States_004283,train,Tier 2: D20 (alligator crack),1,0,2,3,D00+D20
+United_States_002803,train,Tier 2: D20 (alligator crack),1,0,1,2,D00+D20
+United_States_003106,train,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_001425,train,Tier 2: D20 (alligator crack),1,0,2,3,D00+D20
+United_States_000408,train,Tier 2: D20 (alligator crack),1,0,2,3,D00+D20
+United_States_000531,train,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_004444,train,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_003581,train,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_003175,train,Tier 2: D20 (alligator crack),1,0,1,2,D00+D20
+United_States_004432,train,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_004140,train,Tier 3: D10 (transverse crack),0,1,0,1,D10
+United_States_003719,train,Tier 3: D10 (transverse crack),0,1,0,1,D10
+United_States_000248,train,Tier 3: D10 (transverse crack),0,2,1,3,D00+D10
+United_States_003513,train,Tier 3: D10 (transverse crack),0,1,1,2,D00+D10
+United_States_004271,train,Tier 3: D10 (transverse crack),0,2,4,6,D00+D10
+United_States_003680,val,Tier 1: D20 (alligator) + D10 (transverse),1,1,1,3,D00+D10+D20
+United_States_002400,val,Tier 1: D20 (alligator) + D10 (transverse),2,1,0,3,D10+D20
+United_States_000070,val,Tier 2: D20 (alligator crack),1,0,2,3,D00+D20
+United_States_003046,val,Tier 2: D20 (alligator crack),1,0,0,1,D20
+United_States_003685,val,Tier 3: D10 (transverse crack),0,1,0,1,D10

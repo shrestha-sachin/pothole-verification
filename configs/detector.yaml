@@ -1,14 +1,16 @@
 # YOLO Dataset Configuration for Pothole Verification
-# Portable relative paths (resolved relative to this project root)
+# Combined Local Green Bay + RDD2022 US (Balanced 10-20% Background Negatives)
 path: .
 
-# Training sets
+# Training sets (414 images: 146 pothole positives, 268 balanced crack & road negatives)
 train:
   - exports/yolo_labels/train.txt
+  - data/processed/rdd2022/train.txt
 
-# Validation sets (when held-out validation is prepared)
+# Validation sets (92 images: 25 pothole positives, 67 balanced crack & road negatives)
 val:
-  - exports/yolo_labels/train.txt
+  - exports/yolo_labels/val.txt
+  - data/processed/rdd2022/val.txt
 
 names:
   0: pothole

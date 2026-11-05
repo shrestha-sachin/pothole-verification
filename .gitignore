@@ -39,6 +39,7 @@ data/processes/
 *.cache.npy
 data/metadata/*
 !data/metadata/image_inventory.csv
+!data/metadata/rdd_subsampled_negatives.csv
 !data/metadata/.gitkeep
 
 # ---------------------------------------------------------------------------
@@ -50,9 +51,8 @@ data/metadata/*
 # ---------------------------------------------------------------------------
 # Exports (YOLO labels for training — tracked in git)
 # ---------------------------------------------------------------------------
-exports/*
-!exports/yolo_labels/
-exports/yolo_labels/images/
+exports/
+!exports/.gitkeep
 
 # ---------------------------------------------------------------------------
 # Model weights and training artefacts
@@ -64,7 +64,8 @@ exports/yolo_labels/images/
 *.tflite
 runs/
 weights/
-models/weights/
+models/
+!models/.gitkeep
 checkpoints/
 
 # ---------------------------------------------------------------------------
