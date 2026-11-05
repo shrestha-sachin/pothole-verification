@@ -434,6 +434,12 @@ class Database:
             policy_b = conn.execute(
                 "SELECT COUNT(*) FROM events WHERE policy_b_retained = 1"
             ).fetchone()[0]
+            policy_c = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE policy_c_retained = 1"
+            ).fetchone()[0]
+            policy_c_scored = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE policy_c_score IS NOT NULL"
+            ).fetchone()[0]
             reviewed = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
             confirmed = conn.execute(
                 "SELECT COUNT(*) FROM reviews WHERE decision = 'confirmed'"
@@ -444,6 +450,9 @@ class Database:
             uncertain = conn.execute(
                 "SELECT COUNT(*) FROM reviews WHERE decision = 'uncertain'"
             ).fetchone()[0]
+            flag_grouping = conn.execute(
+                "SELECT COUNT(*) FROM reviews WHERE decision = 'flag_grouping'"
+            ).fetchone()[0]
             total_detections = conn.execute(
                 "SELECT COUNT(*) FROM detections"
             ).fetchone()[0]
@@ -453,10 +462,13 @@ class Database:
             "total_events": total_events,
             "policy_a_retained": policy_a,
             "policy_b_retained": policy_b,
+            "policy_c_retained": policy_c,
+            "policy_c_scored": policy_c_scored,
             "reviewed": reviewed,
             "confirmed": confirmed,
             "rejected": rejected,
             "uncertain": uncertain,
+            "flag_grouping": flag_grouping,
             "total_detections": total_detections,
         }
 

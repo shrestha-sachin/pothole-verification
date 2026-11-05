@@ -310,3 +310,172 @@ def run_sensitivity_analysis(
         )
     return results
 
+
+def load_video_ground_truth(
+    video_id: str,
+    project_root: Optional[Path | str] = None,
+) -> list[GroundTruthAnnotation]:
+    """Load and cluster ground-truth annotations for a video from data/annotations/video/.
+
+    Groups multi-frame consecutive observations of the same defect into unified
+    physical defect IDs (gt_event_id) so the denominator is not inflated.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(project_root) if project_root else Path(__file__).resolve().parent.parent.parent
+    anno_dir = root / "data" / "annotations" / "video"
+    if not anno_dir.exists():
+        return []
+
+    # Match JSONs for this video
+    norm_vid = video_id.lower().replace(" ", "_").replace("-", "_")
+    matched_files = []
+    for f in sorted(anno_dir.glob("*.json")):
+        if norm_vid in f.stem.lower() or "green_bay" in f.stem.lower():
+            matched_files.append(f)
+
+    if not matched_files:
+        return []
+
+    raw_items: list[dict] = []
+    for f in matched_files:
+        try:
+            d = json.loads(f.read_text())
+        except Exception:
+            continue
+        if d.get("review_status") != "reviewed" or d.get("uncertain"):
+            continue
+
+        source = d.get("source_filepath", "")
+        m = re.search(r"_t(\d+)", source)
+        ts = int(m.group(1)) if m else 0
+        img_id = d.get("image_id", f.stem)
+
+        for b in d.get("pothole_boxes", []):
+            x, y, w, h = int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])
+            raw_items.append({
+                "video_id": video_id,
+                "timestamp_ms": ts,
+                "x1": x, "y1": y, "x2": x + w, "y2": y + h,
+                "label": "pothole",
+                "source_image_id": img_id,
+            })
+
+        for r in d.get("negative_regions", []):
+            x, y, w, h = int(r.get("x", 0)), int(r.get("y", 0)), int(r.get("w", 0)), int(r.get("h", 0))
+            subtype = str(r.get("subtype", "ordinary_road")).strip()
+            raw_items.append({
+                "video_id": video_id,
+                "timestamp_ms": ts,
+                "x1": x, "y1": y, "x2": x + w, "y2": y + h,
+                "label": subtype,
+                "source_image_id": img_id,
+            })
+
+    # Cluster pothole sightings into physical defect IDs
+    potholes = [item for item in raw_items if item["label"] == "pothole"]
+    negatives = [item for item in raw_items if item["label"] != "pothole"]
+
+    potholes.sort(key=lambda x: x["timestamp_ms"])
+    clusters: list[list[dict]] = []
+    for item in potholes:
+        assigned = False
+        icx = (item["x1"] + item["x2"]) / 2.0
+        icy = (item["y1"] + item["y2"]) / 2.0
+        for c in clusters:
+            last = c[-1]
+            if abs(item["timestamp_ms"] - last["timestamp_ms"]) <= 2500:
+                lcx = (last["x1"] + last["x2"]) / 2.0
+                lcy = (last["y1"] + last["y2"]) / 2.0
+                if abs(icx - lcx) < 400 and abs(icy - lcy) < 400:
+                    c.append(item)
+                    assigned = True
+                    break
+        if not assigned:
+            clusters.append([item])
+
+    annotations: list[GroundTruthAnnotation] = []
+    for idx, c in enumerate(clusters, start=1):
+        gt_id = f"gt_defect_{idx:03d}"
+        for item in c:
+            annotations.append(
+                GroundTruthAnnotation(
+                    video_id=item["video_id"],
+                    timestamp_ms=item["timestamp_ms"],
+                    x1=item["x1"], y1=item["y1"], x2=item["x2"], y2=item["y2"],
+                    gt_event_id=gt_id,
+                    label="pothole",
+                    source_image_id=item["source_image_id"],
+                )
+            )
+
+    for idx, item in enumerate(negatives, start=1):
+        annotations.append(
+            GroundTruthAnnotation(
+                video_id=item["video_id"],
+                timestamp_ms=item["timestamp_ms"],
+                x1=item["x1"], y1=item["y1"], x2=item["x2"], y2=item["y2"],
+                gt_event_id=f"gt_negative_{idx:03d}",
+                label=item["label"],
+                source_image_id=item["source_image_id"],
+            )
+        )
+
+    return annotations
+
+
+def parse_ground_truth_csv(
+    csv_text: str,
+    default_video_id: str = "video_001",
+) -> list[GroundTruthAnnotation]:
+    """Parse a CSV containing ground-truth annotations.
+
+    Expected columns (case-insensitive):
+      video_id (optional), timestamp_ms (or timestamp_sec),
+      x1, y1, x2, y2 (or x, y, w, h),
+      gt_event_id (optional, auto-generated if omitted),
+      label (optional, default 'pothole')
+    """
+    import csv
+    import io
+
+    reader = csv.DictReader(io.StringIO(csv_text))
+    annotations: list[GroundTruthAnnotation] = []
+    for idx, row in enumerate(reader, start=1):
+        r = {k.lower().strip(): v.strip() for k, v in row.items()}
+        vid = r.get("video_id") or default_video_id
+
+        # Timestamps
+        if "timestamp_ms" in r:
+            ts_ms = int(float(r["timestamp_ms"]))
+        elif "timestamp_sec" in r:
+            ts_ms = int(float(r["timestamp_sec"]) * 1000)
+        else:
+            ts_ms = 0
+
+        # Coordinates
+        if "x1" in r and "y1" in r and "x2" in r and "y2" in r:
+            x1, y1, x2, y2 = int(float(r["x1"])), int(float(r["y1"])), int(float(r["x2"])), int(float(r["y2"]))
+        elif "x" in r and "y" in r and "w" in r and "h" in r:
+            x, y, w, h = int(float(r["x"])), int(float(r["y"])), int(float(r["w"])), int(float(r["h"]))
+            x1, y1, x2, y2 = x, y, x + w, y + h
+        else:
+            continue
+
+        label = r.get("label", "pothole") or "pothole"
+        gt_id = r.get("gt_event_id") or f"gt_{ts_ms}_{idx}"
+
+        annotations.append(
+            GroundTruthAnnotation(
+                video_id=vid,
+                timestamp_ms=ts_ms,
+                x1=x1, y1=y1, x2=x2, y2=y2,
+                gt_event_id=gt_id,
+                label=label,
+            )
+        )
+    return annotations
+
+
