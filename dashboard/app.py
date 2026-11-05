@@ -215,6 +215,38 @@ def init_session_state():
 init_session_state()
 
 
+def get_evidence_disk_usage(video_id: str | None = None) -> tuple[int, float]:
+    """Calculate file count and size (MB) of evidence on disk."""
+    target_dir = (EVIDENCE_ROOT / video_id) if video_id else EVIDENCE_ROOT
+    if not target_dir.exists():
+        return 0, 0.0
+    file_count = 0
+    total_bytes = 0
+    for p in target_dir.rglob("*"):
+        if p.is_file():
+            file_count += 1
+            total_bytes += p.stat().st_size
+    return file_count, total_bytes / (1024 * 1024)
+
+
+def delete_evidence_disk(video_id: str | None = None) -> tuple[int, float]:
+    """Remove evidence folder for a specific video or all videos. Returns (file_count, size_mb)."""
+    import shutil
+    target_dir = (EVIDENCE_ROOT / video_id) if video_id else EVIDENCE_ROOT
+    if not target_dir.exists():
+        return 0, 0.0
+    file_count, size_mb = get_evidence_disk_usage(video_id)
+    if video_id:
+        shutil.rmtree(target_dir, ignore_errors=True)
+    else:
+        for item in target_dir.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                item.unlink(missing_ok=True)
+    return file_count, size_mb
+
+
 def fmt_ts(ms: int | float) -> str:
     """Format milliseconds as MM:SS."""
     s = int(ms) // 1000
@@ -473,10 +505,21 @@ def page_process():
     st.markdown('<div class="section-hdr">2. Detector & Verifier Checkpoints</div>', unsafe_allow_html=True)
 
     candidate_models: list[Path] = []
-    for d in [MODELS_DIR, PROJECT_ROOT]:
-        if d.exists():
-            candidate_models.extend(d.glob("*.pt"))
-    candidate_models = sorted(set(candidate_models))
+    for folder, pattern in [
+        (MODELS_DIR, "**/*.pt"),
+        (PROJECT_ROOT / "weights", "**/*.pt"),
+        (PROJECT_ROOT / "runs", "**/*.pt"),
+        (PROJECT_ROOT, "*.pt"),
+    ]:
+        if folder.exists():
+            candidate_models.extend(folder.glob(pattern))
+
+    def _model_sort_key(p: Path) -> tuple[int, float]:
+        is_best = 0 if "best" in p.name.lower() else 1
+        mtime = -p.stat().st_mtime if p.exists() else 0.0
+        return (is_best, mtime)
+
+    candidate_models = sorted(set(candidate_models), key=_model_sort_key)
 
     col_ckpt, col_ver = st.columns(2)
     model_valid = False
@@ -612,12 +655,16 @@ def page_process():
         st.caption("Destructive actions are kept separate from standard workflow and require explicit confirmation.")
         col_cl1, col_cl2 = st.columns([3, 1])
         with col_cl1:
-            confirm_clear = st.checkbox("I understand this will permanently delete all candidate events and review records for this video.", key="chk_clear_vid")
+            confirm_clear = st.checkbox("I understand this will permanently delete all candidate events, reviews, and disk evidence for this video.", key="chk_clear_vid")
         with col_cl2:
             if st.button("Delete Video Events", type="secondary", disabled=not confirm_clear, use_container_width=True):
                 if video_id_final:
-                    db.delete_events_for_video(video_id_final, clear_reviews=True)
-                    st.success(f"Cleared events for `{video_id_final}`.")
+                    if hasattr(db, "delete_video_data"):
+                        db.delete_video_data(video_id_final, clear_reviews=True, reset_status=True)
+                    else:
+                        db.delete_events_for_video(video_id_final, clear_reviews=True)
+                    n_f, sz_mb = delete_evidence_disk(video_id_final)
+                    st.success(f"Cleared events and {n_f} evidence files ({sz_mb:.1f} MB) for `{video_id_final}`.")
                     st.rerun()
 
 
