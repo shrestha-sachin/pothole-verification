@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -51,6 +52,14 @@ class ObservedDetection:
     y2: int
     conf: float
     laplacian_var: float = 0.0  # sharpness score of the crop
+
+
+@dataclass
+class CandidateEvidence:
+    """Lightweight reference to candidate observation and its optional staged evidence on disk."""
+    obs: ObservedDetection
+    crop_path: Optional[Path] = None
+    full_path: Optional[Path] = None
 
 
 @dataclass
@@ -210,8 +219,10 @@ class EventGrouper:
           1. Stream frames without retaining 4K bitmaps in RAM.
           2. Reset tracker state between videos.
           3. Pass BGR directly to model.track (Ultralytics handles flip).
-          4. Maintain bounded evidence buffers per active track.
-          5. Write evidence and assemble CandidateEvents.
+          4. Maintain bounded evidence buffers on disk staging per active track,
+             evicting files when popped and flushing when tracks go inactive.
+          5. Handle tracker reactivation explicitly if historical track ID re-appears.
+          6. Write final evidence and assemble CandidateEvents.
         """
         self.validate_checkpoint(model)
 
@@ -220,79 +231,49 @@ class EventGrouper:
         # Clean tracker reset
         model.predictor = None
 
-        track_obs: dict[int, list[ObservedDetection]] = {}
-        # track_id -> dict of candidate observation info:
-        # {obs_index: (obs, crop_bgr, full_frame_jpg_bytes)}
-        track_candidates: dict[int, list[tuple[ObservedDetection, np.ndarray, bytes]]] = {}
-
-        for frame_idx, (fi, ts_ms, bgr) in enumerate(frame_iter):
-            # Pass BGR directly to model.track (BasePredictor preprocess flips BGR to RGB)
-            results = model.track(
-                bgr,
-                conf=conf,
-                iou=iou,
-                imgsz=imgsz,
-                device=device,
-                tracker=cfg_path,
-                persist=True,
-                verbose=False,
-            )
-
-            for r in results:
-                if r.boxes is None or r.boxes.id is None:
-                    continue
-                for box in r.boxes:
-                    cls_id = int(box.cls[0].item())
-                    if cls_id != self.target_class_id:
-                        continue
-                    box_conf = float(box.conf[0].item())
-                    track_id = int(box.id[0].item())
-                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-
-                    # Only record as actual observation if conf >= threshold
-                    if box_conf >= conf:
-                        crop_bgr = extract_padded_crop(bgr, (x1, y1, x2, y2), pad_frac=DEFAULT_PAD_FRAC)
-                        lap_var = compute_laplacian_variance(crop_bgr)
-
-                        obs = ObservedDetection(
-                            frame_index=fi,
-                            timestamp_ms=ts_ms,
-                            x1=x1, y1=y1, x2=x2, y2=y2,
-                            conf=box_conf,
-                            laplacian_var=lap_var,
-                        )
-                        track_obs.setdefault(track_id, []).append(obs)
-
-                        # Bounded evidence: keep up to top 3 confidence candidates for this track
-                        cands = track_candidates.setdefault(track_id, [])
-                        if len(cands) < self.max_candidate_obs_for_rep or box_conf > min(c[0].conf for c in cands):
-                            # Compress full frame as JPEG to bound memory
-                            annotated = bgr.copy()
-                            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 80), 3)
-                            lbl = f"pothole {box_conf:.2f}"
-                            (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
-                            cv2.rectangle(annotated, (x1, max(0, y1 - th - 12)), (x1 + tw + 8, y1), (0, 200, 80), -1)
-                            cv2.putText(annotated, lbl, (x1 + 4, max(0, y1 - 6)),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-                            _, jpg_bytes = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 88])
-
-                            cands.append((obs, crop_bgr, jpg_bytes.tobytes()))
-                            # Keep only top 3 by confidence
-                            cands.sort(key=lambda t: t[0].conf, reverse=True)
-                            if len(cands) > self.max_candidate_obs_for_rep:
-                                cands.pop()
-
-            if progress_callback:
-                progress_callback(frame_idx + 1, total_expected_frames)
-
-        # Assemble CandidateEvent objects
-        events: list[CandidateEvent] = []
-        tracker_cfg_snapshot = self._tracker_config_snapshot()
         ev_root = Path(evidence_root) if evidence_root else None
+        tmp_dir: Optional[Path] = None
+        if ev_root:
+            tmp_dir = ev_root / self.video_id / ".tmp_candidates"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        for track_id, obs_list in track_obs.items():
+        track_obs: dict[int, list[ObservedDetection]] = {}
+        last_seen_frame: dict[int, int] = {}
+        finalized_events: dict[int, CandidateEvent] = {}
+        track_candidates: dict[int, list[CandidateEvidence]] = {}
+
+        tracker_cfg_snapshot = self._tracker_config_snapshot()
+        inactivity_threshold = 2 * self.track_buffer
+
+        def _save_candidate_files(
+            tid: int,
+            f_idx: int,
+            b_conf: float,
+            b_coords: tuple[int, int, int, int],
+            frame_bgr: np.ndarray,
+            crop_img: np.ndarray,
+        ) -> tuple[Optional[Path], Optional[Path]]:
+            if not (ev_root and tmp_dir):
+                return None, None
+            c_path = tmp_dir / f"t{tid}_f{f_idx}_crop.jpg"
+            cv2.imwrite(str(c_path), crop_img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+
+            ann = frame_bgr.copy()
+            x1, y1, x2, y2 = b_coords
+            cv2.rectangle(ann, (x1, y1), (x2, y2), (0, 200, 80), 3)
+            lbl = f"pothole {b_conf:.2f}"
+            (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+            cv2.rectangle(ann, (x1, max(0, y1 - th - 12)), (x1 + tw + 8, y1), (0, 200, 80), -1)
+            cv2.putText(ann, lbl, (x1 + 4, max(0, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+            f_path = tmp_dir / f"t{tid}_f{f_idx}_full.jpg"
+            cv2.imwrite(str(f_path), ann, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            return c_path, f_path
+
+        def _finalize_track(tid: int) -> None:
+            obs_list = track_obs.get(tid, [])
             if not obs_list:
-                continue
+                return
             obs_list.sort(key=lambda o: o.timestamp_ms)
             confs = [o.conf for o in obs_list]
             event_id = str(uuid.uuid4())[:8]
@@ -305,7 +286,7 @@ class EventGrouper:
                 event_id=event_id,
                 video_id=self.video_id,
                 road_segment_id=self.road_segment_id,
-                track_id=track_id,
+                track_id=tid,
                 first_timestamp_ms=obs_list[0].timestamp_ms,
                 last_timestamp_ms=obs_list[-1].timestamp_ms,
                 first_frame_index=obs_list[0].frame_index,
@@ -323,39 +304,33 @@ class EventGrouper:
                 tracker_config=tracker_cfg_snapshot,
             )
 
-            # Save evidence files if root provided
             if ev_root:
                 ev_dir = ev_root / self.video_id / event_id
                 ev_dir.mkdir(parents=True, exist_ok=True)
 
-                # Find candidate match
-                cands = track_candidates.get(track_id, [])
-                matching_cand = next((c for c in cands if c[0].frame_index == best_obs.frame_index), None)
+                cands = track_candidates.get(tid, [])
+                matching_cand = next((c for c in cands if c.obs.frame_index == best_obs.frame_index), None)
                 if matching_cand is None and cands:
                     matching_cand = cands[0]
 
                 if matching_cand is not None:
-                    _, crop_bgr, full_jpg = matching_cand
+                    if matching_cand.crop_path and matching_cand.crop_path.exists():
+                        target_crop = ev_dir / "crop.jpg"
+                        shutil.copy2(matching_cand.crop_path, target_crop)
+                        event.crop_path = str(target_crop)
 
-                    crop_path = ev_dir / "crop.jpg"
-                    cv2.imwrite(str(crop_path), crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
-                    event.crop_path = str(crop_path)
+                    if matching_cand.full_path and matching_cand.full_path.exists():
+                        target_full = ev_dir / "full_frame.jpg"
+                        shutil.copy2(matching_cand.full_path, target_full)
+                        event.full_frame_path = str(target_full)
 
-                    full_path = ev_dir / "full_frame.jpg"
-                    full_path.write_bytes(full_jpg)
-                    event.full_frame_path = str(full_path)
-
-                # Generate short evidence clip if requested and video exists
-                if generate_clips and video_path and Path(video_path).exists():
-                    clip_path = ev_dir / "clip.mp4"
-                    success = self._extract_evidence_clip(
-                        video_path=Path(video_path),
-                        target_ts_ms=best_obs.timestamp_ms,
-                        output_clip_path=clip_path,
-                        window_sec=1.5,
-                    )
-                    if success:
-                        event.clip_path = str(clip_path)
+                # Clean up and release candidate staging files for this track
+                for c in cands:
+                    if c.crop_path and c.crop_path.exists():
+                        c.crop_path.unlink(missing_ok=True)
+                    if c.full_path and c.full_path.exists():
+                        c.full_path.unlink(missing_ok=True)
+                track_candidates.pop(tid, None)
 
             # Apply temporal Policy B check
             temporal_pass = check_temporal_window(
@@ -367,9 +342,156 @@ class EventGrouper:
             event.policy_a_retained = event.detector_conf_max >= conf
             event.policy_b_retained = event.policy_a_retained and temporal_pass
 
-            events.append(event)
+            finalized_events[tid] = event
 
-        return events
+        try:
+            for frame_idx, (fi, ts_ms, bgr) in enumerate(frame_iter):
+                # Pass BGR directly to model.track (BasePredictor preprocess flips BGR to RGB)
+                results = model.track(
+                    bgr,
+                    conf=conf,
+                    iou=iou,
+                    imgsz=imgsz,
+                    device=device,
+                    tracker=cfg_path,
+                    persist=True,
+                    verbose=False,
+                )
+
+                for r in results:
+                    if r.boxes is None or r.boxes.id is None:
+                        continue
+                    for box in r.boxes:
+                        cls_id = int(box.cls[0].item())
+                        if cls_id != self.target_class_id:
+                            continue
+                        box_conf = float(box.conf[0].item())
+                        track_id = int(box.id[0].item())
+                        x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+
+                        # Only record as actual observation if conf >= threshold
+                        if box_conf >= conf:
+                            crop_bgr = extract_padded_crop(bgr, (x1, y1, x2, y2), pad_frac=DEFAULT_PAD_FRAC)
+                            lap_var = compute_laplacian_variance(crop_bgr)
+
+                            obs = ObservedDetection(
+                                frame_index=fi,
+                                timestamp_ms=ts_ms,
+                                x1=x1, y1=y1, x2=x2, y2=y2,
+                                conf=box_conf,
+                                laplacian_var=lap_var,
+                            )
+
+                            if track_id in finalized_events:
+                                # Explicit tracker reactivation: track was finalized earlier but tracker reused ID
+                                event = finalized_events[track_id]
+                                track_obs[track_id].append(obs)
+                                last_seen_frame[track_id] = frame_idx
+
+                                event.last_timestamp_ms = obs.timestamp_ms
+                                event.last_frame_index = obs.frame_index
+                                event.observation_count = len(track_obs[track_id])
+                                all_confs = [o.conf for o in track_obs[track_id]]
+                                event.detector_conf_max = max(all_confs)
+                                event.detector_conf_mean = float(np.mean(all_confs))
+
+                                # Re-check policies
+                                temporal_pass = check_temporal_window(
+                                    track_obs[track_id],
+                                    min_obs=self.policy_b_min_obs,
+                                    window_size_frames=self.policy_b_window_frames,
+                                    conf_threshold=conf,
+                                )
+                                event.policy_a_retained = event.detector_conf_max >= conf
+                                event.policy_b_retained = event.policy_a_retained and temporal_pass
+
+                                # Check if new detection is sharper or higher confidence representative
+                                new_best = select_representative_observation(track_obs[track_id])
+                                if new_best and new_best.frame_index == obs.frame_index:
+                                    event.rep_x1 = new_best.x1
+                                    event.rep_y1 = new_best.y1
+                                    event.rep_x2 = new_best.x2
+                                    event.rep_y2 = new_best.y2
+                                    event.rep_timestamp_ms = new_best.timestamp_ms
+                                    event.rep_frame_index = new_best.frame_index
+
+                                    if ev_root:
+                                        ev_dir = ev_root / self.video_id / event.event_id
+                                        ev_dir.mkdir(parents=True, exist_ok=True)
+                                        crop_path = ev_dir / "crop.jpg"
+                                        cv2.imwrite(str(crop_path), crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                                        event.crop_path = str(crop_path)
+
+                                        annotated = bgr.copy()
+                                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 80), 3)
+                                        lbl = f"pothole {box_conf:.2f}"
+                                        (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+                                        cv2.rectangle(annotated, (x1, max(0, y1 - th - 12)), (x1 + tw + 8, y1), (0, 200, 80), -1)
+                                        cv2.putText(annotated, lbl, (x1 + 4, max(0, y1 - 6)),
+                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+                                        full_path = ev_dir / "full_frame.jpg"
+                                        cv2.imwrite(str(full_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 88])
+                                        event.full_frame_path = str(full_path)
+                            else:
+                                # Normal active track
+                                track_obs.setdefault(track_id, []).append(obs)
+                                last_seen_frame[track_id] = frame_idx
+
+                                cands = track_candidates.setdefault(track_id, [])
+                                qualifies = (len(cands) < self.max_candidate_obs_for_rep) or (box_conf > min(c.obs.conf for c in cands))
+
+                                if qualifies:
+                                    cand_cpath, cand_fpath = _save_candidate_files(
+                                        track_id, fi, box_conf, (x1, y1, x2, y2), bgr, crop_bgr
+                                    )
+                                    cands.append(CandidateEvidence(obs=obs, crop_path=cand_cpath, full_path=cand_fpath))
+                                    cands.sort(key=lambda c: c.obs.conf, reverse=True)
+                                    if len(cands) > self.max_candidate_obs_for_rep:
+                                        evicted = cands.pop()
+                                        if evicted.crop_path and evicted.crop_path.exists():
+                                            evicted.crop_path.unlink(missing_ok=True)
+                                        if evicted.full_path and evicted.full_path.exists():
+                                            evicted.full_path.unlink(missing_ok=True)
+
+                # Periodically flush inactive tracks (unseen for > 2 * track_buffer frames)
+                for tid, l_frame in list(last_seen_frame.items()):
+                    if tid not in finalized_events and (frame_idx - l_frame) > inactivity_threshold:
+                        _finalize_track(tid)
+
+                if progress_callback:
+                    progress_callback(frame_idx + 1, total_expected_frames)
+
+            # Finalize any remaining unfinalized tracks at stream completion
+            for tid in list(track_obs.keys()):
+                if tid not in finalized_events:
+                    _finalize_track(tid)
+
+            # Generate short evidence clips if requested and video exists
+            if generate_clips and video_path and Path(video_path).exists() and ev_root:
+                for event in finalized_events.values():
+                    if not event.clip_path:
+                        ev_dir = ev_root / self.video_id / event.event_id
+                        clip_path = ev_dir / "clip.mp4"
+                        success = self._extract_evidence_clip(
+                            video_path=Path(video_path),
+                            target_ts_ms=event.rep_timestamp_ms,
+                            output_clip_path=clip_path,
+                            window_sec=1.5,
+                        )
+                        if success:
+                            event.clip_path = str(clip_path)
+
+            events = sorted(finalized_events.values(), key=lambda e: (e.first_timestamp_ms, e.track_id))
+            return events
+
+        finally:
+            # Clean up disk staging folder
+            if tmp_dir and tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            # Clean up temp tracker YAML config
+            if self._tmp_cfg_path and Path(self._tmp_cfg_path).exists():
+                Path(self._tmp_cfg_path).unlink(missing_ok=True)
+                self._tmp_cfg_path = None
 
     def _extract_evidence_clip(
         self,

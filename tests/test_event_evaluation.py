@@ -149,6 +149,78 @@ class TestEventLevelEvaluation(unittest.TestCase):
         self.assertEqual(results[0.5].true_positives, 0)  # IoU 0.40 < 0.5
         self.assertEqual(results[0.3].true_positives, 1)  # IoU 0.40 >= 0.3
 
+    def test_global_bipartite_matching_resolves_greedy_assignment_pathology(self):
+        """CRITICAL REGRESSION TEST:
+        Report 1 matches Pothole A (IoU 0.8) and Pothole B (IoU 0.6).
+        Report 2 only matches Pothole A (IoU 0.7).
+        Greedy local matching causes:
+          rep1 -> A (claimed)
+          rep2 -> A (duplicate!), B is missed (FN!) -> 1 TP, 1 dup, 1 miss.
+        Global matching MUST resolve:
+          rep1 -> B, rep2 -> A -> 2 True Positives, 0 duplicates, 0 misses!
+        """
+        # Pothole A at (0, 0, 100, 100)
+        gt_a = GroundTruthAnnotation("vid1", 1000, 0, 0, 100, 100, "pothole_A", "pothole")
+        # Pothole B at (300, 300, 400, 400)
+        gt_b = GroundTruthAnnotation("vid1", 1000, 300, 300, 400, 400, "pothole_B", "pothole")
+
+        # Report 1 has large box overlapping both A (high overlap) and B (moderate overlap)
+        # We can construct observations for rep1 that match both A and B
+        obs_rep1_a = ObservedDetection(0, 1000, 0, 0, 100, 125, 0.90, 150.0)    # IoU ~0.80 with A
+        obs_rep1_b = ObservedDetection(0, 1000, 300, 300, 400, 460, 0.90, 150.0) # IoU ~0.62 with B
+
+        rep1 = CandidateEvent(
+            event_id="rep1", video_id="vid1", road_segment_id="seg1", track_id=1,
+            first_timestamp_ms=1000, last_timestamp_ms=1000,
+            first_frame_index=0, last_frame_index=0,
+            detector_conf_max=0.90, detector_conf_mean=0.90, observation_count=2,
+            rep_x1=0, rep_y1=0, rep_x2=100, rep_y2=125,
+            rep_timestamp_ms=1000, rep_frame_index=0,
+            observations=[obs_rep1_a, obs_rep1_b],
+        )
+
+        # Report 2 only has observation matching A
+        obs_rep2_a = ObservedDetection(0, 1000, 0, 0, 100, 142, 0.75, 120.0)    # IoU ~0.70 with A
+        rep2 = CandidateEvent(
+            event_id="rep2", video_id="vid1", road_segment_id="seg1", track_id=2,
+            first_timestamp_ms=1000, last_timestamp_ms=1000,
+            first_frame_index=0, last_frame_index=0,
+            detector_conf_max=0.75, detector_conf_mean=0.75, observation_count=1,
+            rep_x1=0, rep_y1=0, rep_x2=100, rep_y2=142,
+            rep_timestamp_ms=1000, rep_frame_index=0,
+            observations=[obs_rep2_a],
+        )
+
+        # Forward order [rep1, rep2]
+        res = evaluate_event_detections([rep1, rep2], [gt_a, gt_b], video_duration_min=1.0)
+        self.assertEqual(res.true_positives, 2, "Must produce 2 True Positives via global matching!")
+        self.assertEqual(res.duplicate_reports, 0, "Must produce 0 Duplicates!")
+        self.assertEqual(res.missed_potholes, 0, "Must produce 0 Misses!")
+        self.assertEqual(res.event_recall, 1.0)
+        self.assertEqual(res.report_precision, 1.0)
+
+        # Reversed order [rep2, rep1] — must be 100% order invariant!
+        res_rev = evaluate_event_detections([rep2, rep1], [gt_a, gt_b], video_duration_min=1.0)
+        self.assertEqual(res_rev.true_positives, 2, "Reversed order must produce 2 True Positives!")
+        self.assertEqual(res_rev.duplicate_reports, 0, "Reversed order must produce 0 Duplicates!")
+        self.assertEqual(res_rev.missed_potholes, 0, "Reversed order must produce 0 Misses!")
+        self.assertEqual(res_rev.event_recall, 1.0)
+        self.assertEqual(res_rev.report_precision, 1.0)
+
+    def test_non_positive_duration_raises_error(self):
+        gt = GroundTruthAnnotation("vid1", 1000, 0, 0, 50, 50, "p1", "pothole")
+        rep = make_eval_event("rep1", "vid1", 1000, (0, 0, 50, 50))
+        with self.assertRaises(ValueError):
+            evaluate_event_detections([rep], [gt], video_duration_min=0.0)
+        with self.assertRaises(ValueError):
+            evaluate_event_detections([rep], [gt], video_duration_min=-1.5)
+
+    def test_missing_gt_event_id_raises_error(self):
+        gt_invalid = GroundTruthAnnotation("vid1", 1000, 0, 0, 50, 50, "", "pothole")
+        rep = make_eval_event("rep1", "vid1", 1000, (0, 0, 50, 50))
+        with self.assertRaises(ValueError):
+            evaluate_event_detections([rep], [gt_invalid], video_duration_min=1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

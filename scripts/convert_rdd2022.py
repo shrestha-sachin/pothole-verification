@@ -208,7 +208,7 @@ def write_yolo_yaml(yaml_path: Path, output_dir: Path, train_list: Path, val_lis
     print(f"[OK] Wrote YOLO dataset config to: {yaml_path}")
 
 
-def main() -> None:
+def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description="Convert RDD2022 Pascal VOC annotations to YOLO format.")
     parser.add_argument("--input", "-i", type=Path, required=True, help="Path to RDD2022 root directory")
     parser.add_argument("--output", "-o", type=Path, default=PROJECT_ROOT / "data" / "processed" / "rdd2022",
@@ -224,8 +224,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Inspect and count annotations without saving")
     parser.add_argument("--copy-images", action="store_true",
                         help="Copy images to output directory (default: write image paths without copying)")
+    parser.add_argument("--config-yaml", type=Path, default=PROJECT_ROOT / "configs" / "detector.yaml",
+                        help="Path to generated detector YAML config (default: configs/detector.yaml)")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     input_dir: Path = args.input.resolve()
     if not input_dir.exists():
@@ -289,10 +291,13 @@ def main() -> None:
         # Use filename prefix (e.g. United_States_001 or Japan_000001) as sequence/group key
         parts = img_p.stem.split("_")
         seq_key = "_".join(parts[:-1]) if len(parts) > 1 else item[2]
-        seq_groups.setdefault(seq_key, []).append(item)
+        seq_groups.setdefault(f"{item[2]}_{seq_key}", []).append(item)
 
     seq_keys = sorted(seq_groups.keys())
     random.shuffle(seq_keys)
+    print(f"\nSequence grouping: partitioned into {len(seq_keys)} groups using country and filename prefixes.")
+    print("  [NOTE] Filename prefixes are a grouping heuristic. If official camera or GPS sequence logs")
+    print("  are available in RDD2022 metadata, prefer those to guarantee physical road independence.")
 
     val_target = int(len(processed_items) * args.val_split)
     val_items = []
@@ -304,6 +309,12 @@ def main() -> None:
             val_items.extend(items)
         else:
             train_items.extend(items)
+
+    # Validate that both train and validation sets are non-empty
+    if not train_items:
+        sys.exit("ERROR: Train split is empty after sequence grouping. Adjust --val-split or supply more images.")
+    if not val_items:
+        sys.exit("ERROR: Validation split is empty after sequence grouping. Adjust --val-split or supply more images.")
 
     out_dir = args.output.resolve()
 
@@ -321,14 +332,21 @@ def main() -> None:
             # Link or copy image into images/split/ so Ultralytics standard label mapping succeeds
             target_img = images_dir / img_path.name
             if not target_img.exists() and not target_img.is_symlink():
-                try:
-                    rel_src = os.path.relpath(img_path, images_dir)
-                    os.symlink(rel_src, target_img)
-                except OSError:
+                if args.copy_images:
                     import shutil
                     shutil.copy2(img_path, target_img)
+                else:
+                    try:
+                        rel_src = os.path.relpath(img_path, images_dir)
+                        os.symlink(rel_src, target_img)
+                    except OSError:
+                        import shutil
+                        shutil.copy2(img_path, target_img)
 
-            img_path_list.append(target_img.resolve().as_posix())
+            # CRITICAL: Append absolute output path WITHOUT dereferencing symlinks!
+            # Using target_img.resolve() would point back to source RDD2022 directory,
+            # which breaks Ultralytics img2label_paths resolution.
+            img_path_list.append(target_img.absolute().as_posix())
 
     train_img_paths: list[str] = []
     val_img_paths: list[str] = []
@@ -342,8 +360,35 @@ def main() -> None:
     train_txt.write_text("\n".join(train_img_paths) + "\n", encoding="utf-8")
     val_txt.write_text("\n".join(val_img_paths) + "\n", encoding="utf-8")
 
-    # Generate configs/detector.yaml
-    config_yaml = PROJECT_ROOT / "configs" / "detector.yaml"
+    # Verify Ultralytics label resolution
+    def verify_label_resolution(manifest_path: Path) -> None:
+        missing = []
+        for line in manifest_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            p = Path(line)
+            parts = list(p.parts)
+            if "images" in parts:
+                idx = len(parts) - 1 - parts[::-1].index("images")
+                parts[idx] = "labels"
+                lbl_file = Path(*parts).with_suffix(".txt")
+                if not lbl_file.exists():
+                    missing.append(f"{line} -> {lbl_file}")
+            else:
+                missing.append(f"No 'images' directory in path: {line}")
+        if missing:
+            raise RuntimeError(
+                f"Ultralytics label resolution failed for {len(missing)} images in {manifest_path.name}! "
+                f"Sample missing: {missing[:3]}"
+            )
+
+    verify_label_resolution(train_txt)
+    verify_label_resolution(val_txt)
+    print("✓ Verified Ultralytics img2label_paths: 100% of train and val images resolve to generated labels.")
+
+    # Generate detector YAML config
+    config_yaml = Path(args.config_yaml).resolve()
     write_yolo_yaml(config_yaml, out_dir, train_txt, val_txt, class_names)
 
     print(f"\n[SUCCESS] Conversion complete:")

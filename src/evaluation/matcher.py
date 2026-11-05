@@ -20,6 +20,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,6 +130,87 @@ def _find_best_gt_match(
     return best_gt, best_iou
 
 
+def _hungarian_bipartite_matching(weights: np.ndarray) -> list[tuple[int, int]]:
+    """Solve maximum weight bipartite matching for N reports and M ground-truth defects.
+
+    Maximizes the total matching weight. Because valid edges are assigned a large
+    base weight (1000.0 + IoU), this strictly maximizes the number of one-to-one
+    matches, breaking ties by highest total IoU.
+    Prefers lap.lapjv (from lapx) for C-speed; falls back to pure Python Kuhn-Munkres.
+    """
+    N, M = weights.shape
+    if N == 0 or M == 0:
+        return []
+
+    # Attempt fast C-solver from lapx
+    try:
+        import lap
+        K = max(N, M)
+        cost = np.zeros((K, K), dtype=np.float64)
+        for i in range(N):
+            for j in range(M):
+                if weights[i, j] > 0:
+                    cost[i, j] = -weights[i, j]
+        opt, x, y = lap.lapjv(cost)
+        return [(i, int(x[i])) for i in range(N) if x[i] < M and weights[i, x[i]] > 0]
+    except Exception:
+        pass
+
+    # Pure Python Hungarian (Kuhn-Munkres) O(V^3) algorithm
+    K = max(N, M)
+    cost = np.zeros((K, K), dtype=np.float64)
+    for i in range(N):
+        for j in range(M):
+            if weights[i, j] > 0:
+                cost[i, j] = -weights[i, j]
+
+    u = np.zeros(K + 1)
+    v = np.zeros(K + 1)
+    p = np.zeros(K + 1, dtype=int)
+    way = np.zeros(K + 1, dtype=int)
+    for i in range(1, K + 1):
+        p[0] = i
+        j0 = 0
+        minv = np.full(K + 1, np.inf)
+        used = np.zeros(K + 1, dtype=bool)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = np.inf
+            j1 = 0
+            for j in range(1, K + 1):
+                if not used[j]:
+                    cur = cost[i0 - 1, j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+            for j in range(K + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+
+    ans = [-1] * N
+    for j in range(1, K + 1):
+        if p[j] <= N:
+            ans[p[j] - 1] = j - 1
+
+    return [(i, ans[i]) for i in range(N) if 0 <= ans[i] < M and weights[i, ans[i]] > 0]
+
+
 def evaluate_event_detections(
     predicted_events: Sequence[Any],
     ground_truth_annotations: Sequence[GroundTruthAnnotation | dict],
@@ -135,28 +218,39 @@ def evaluate_event_detections(
     iou_threshold: float = 0.5,
     temporal_tolerance_ms: int = 1500,
 ) -> EvaluationMetrics:
-    """Perform one-to-one event-level matching and calculate comprehensive evaluation metrics.
+    """Perform global one-to-one event-level matching and calculate comprehensive evaluation metrics.
+
+    Uses maximum-weight bipartite matching to globally maximize the number of
+    valid one-to-one matches (breaking ties by IoU), resolving greedy assignment
+    pathologies.
 
     Parameters
     ----------
     predicted_events : sequence of CandidateEvent or dicts
-        The retained candidate reports to evaluate.
+        The candidate reports to evaluate.
     ground_truth_annotations : sequence of GroundTruthAnnotation or dicts
         Independent ground-truth boxes with physical gt_event_id.
     video_duration_min : float
-        Video duration in minutes for calculating false alert rate.
+        Video duration in minutes for calculating false alert rate (must be positive).
     iou_threshold : float
         Spatial overlap threshold (default 0.5, sensitivity 0.3).
     temporal_tolerance_ms : int
         Maximum timestamp difference (ms) to consider an observation aligned with GT (default 1500 ms).
     """
-    # Normalize ground truth annotations
+    if video_duration_min <= 0:
+        raise ValueError(f"video_duration_min must be strictly positive (got {video_duration_min} minutes).")
+
+    # Normalize and validate ground truth annotations
     gt_list: list[GroundTruthAnnotation] = []
-    for g in ground_truth_annotations:
+    for idx, g in enumerate(ground_truth_annotations):
         if isinstance(g, GroundTruthAnnotation):
+            if not g.gt_event_id or not str(g.gt_event_id).strip():
+                raise ValueError(f"Ground truth annotation at index {idx} missing required physical defect ID 'gt_event_id'.")
             gt_list.append(g)
         elif isinstance(g, dict):
-            # Parse dict
+            raw_gid = g.get("gt_event_id") or g.get("event_id")
+            if not raw_gid or not str(raw_gid).strip():
+                raise ValueError(f"Ground truth dict at index {idx} missing required physical defect ID 'gt_event_id'.")
             gt_list.append(
                 GroundTruthAnnotation(
                     video_id=str(g.get("video_id", "")),
@@ -165,7 +259,7 @@ def evaluate_event_detections(
                     y1=int(g.get("y1", g.get("y", 0))),
                     x2=int(g.get("x2", g.get("x", 0) + g.get("w", 0))),
                     y2=int(g.get("y2", g.get("y", 0) + g.get("h", 0))),
-                    gt_event_id=str(g.get("gt_event_id", g.get("event_id", f"gt_{g.get('timestamp_ms', 0)}"))),
+                    gt_event_id=str(raw_gid).strip(),
                     label=str(g.get("label", "pothole")),
                     frame_index=g.get("frame_index"),
                     source_image_id=str(g.get("source_image_id", g.get("image_id", ""))),
@@ -178,20 +272,132 @@ def evaluate_event_detections(
         if gt.is_pothole:
             unique_gt_potholes.setdefault((gt.video_id, gt.gt_event_id), []).append(gt)
 
-    total_gt_potholes = len(unique_gt_potholes)
+    gt_pothole_keys = sorted(unique_gt_potholes.keys())
+    total_gt_potholes = len(gt_pothole_keys)
 
-    # Sort reports by confidence descending so strongest detector evidence gets first matching claim
-    sorted_reports = list(predicted_events)
-    sorted_reports.sort(
-        key=lambda ev: getattr(ev, "detector_conf_max", 0.0) if not isinstance(ev, dict) else ev.get("detector_conf_max", 0.0),
-        reverse=True,
-    )
+    # Extract reports and their observation lists (using representative timestamp if observations empty)
+    reports = list(predicted_events)
+    report_obs_lists: list[list[dict]] = []
 
-    claimed_gt_events: set[tuple[str, str]] = set()
+    for ev in reports:
+        obs_list = getattr(ev, "observations", None)
+        if obs_list is None and isinstance(ev, dict):
+            obs_list = ev.get("observations")
+
+        if obs_list:
+            report_obs_lists.append([
+                {
+                    "timestamp_ms": getattr(o, "timestamp_ms", 0) if not isinstance(o, dict) else o.get("timestamp_ms", 0),
+                    "frame_index": getattr(o, "frame_index", None) if not isinstance(o, dict) else o.get("frame_index"),
+                    "x1": getattr(o, "x1", 0) if not isinstance(o, dict) else o.get("x1", 0),
+                    "y1": getattr(o, "y1", 0) if not isinstance(o, dict) else o.get("y1", 0),
+                    "x2": getattr(o, "x2", 0) if not isinstance(o, dict) else o.get("x2", 0),
+                    "y2": getattr(o, "y2", 0) if not isinstance(o, dict) else o.get("y2", 0),
+                }
+                for o in obs_list
+            ])
+        else:
+            # Fall back to representative observation, strictly using rep_timestamp_ms if present
+            rep_ts = getattr(ev, "rep_timestamp_ms", None)
+            if rep_ts is None and isinstance(ev, dict):
+                rep_ts = ev.get("rep_timestamp_ms")
+            if rep_ts is None:
+                rep_ts = getattr(ev, "first_timestamp_ms", 0) if not isinstance(ev, dict) else ev.get("first_timestamp_ms", 0)
+
+            rep_fi = getattr(ev, "rep_frame_index", None)
+            if rep_fi is None and isinstance(ev, dict):
+                rep_fi = ev.get("rep_frame_index")
+
+            rep_x1 = getattr(ev, "rep_x1", 0) if not isinstance(ev, dict) else ev.get("rep_x1", 0)
+            rep_y1 = getattr(ev, "rep_y1", 0) if not isinstance(ev, dict) else ev.get("rep_y1", 0)
+            rep_x2 = getattr(ev, "rep_x2", 0) if not isinstance(ev, dict) else ev.get("rep_x2", 0)
+            rep_y2 = getattr(ev, "rep_y2", 0) if not isinstance(ev, dict) else ev.get("rep_y2", 0)
+
+            report_obs_lists.append([{
+                "timestamp_ms": rep_ts,
+                "frame_index": rep_fi,
+                "x1": rep_x1,
+                "y1": rep_y1,
+                "x2": rep_x2,
+                "y2": rep_y2,
+            }])
+
+    N = len(reports)
+    M = total_gt_potholes
+
+    # Construct Bipartite Graph Weight Matrix
+    # Large base weight (1000.0) guarantees maximizing cardinality of matching first,
+    # and +IoU resolves assignments by highest spatial overlap.
+    W = np.zeros((N, M), dtype=np.float64)
+    best_matching_obs_info: dict[tuple[int, int], tuple[float, GroundTruthAnnotation]] = {}
+
+    for i, ev in enumerate(reports):
+        ev_vid = getattr(ev, "video_id", "") if not isinstance(ev, dict) else ev.get("video_id", "")
+        obs_entries = report_obs_lists[i]
+
+        for j, gt_key in enumerate(gt_pothole_keys):
+            if ev_vid != gt_key[0]:
+                continue
+            gt_boxes = unique_gt_potholes[gt_key]
+
+            max_edge_iou = 0.0
+            best_gt_box = None
+
+            for obs in obs_entries:
+                obs_ts = obs["timestamp_ms"]
+                obs_box = (obs["x1"], obs["y1"], obs["x2"], obs["y2"])
+
+                for gt_box in gt_boxes:
+                    # Temporal tolerance check
+                    if abs(obs_ts - gt_box.timestamp_ms) > temporal_tolerance_ms:
+                        continue
+                    iou = box_iou(obs_box, gt_box.box_xyxy)
+                    if iou >= iou_threshold and iou > max_edge_iou:
+                        max_edge_iou = iou
+                        best_gt_box = gt_box
+
+            if max_edge_iou >= iou_threshold and best_gt_box is not None:
+                W[i, j] = 1000.0 + max_edge_iou
+                best_matching_obs_info[(i, j)] = (max_edge_iou, best_gt_box)
+
+    # Solve global optimal assignment
+    optimal_matches = _hungarian_bipartite_matching(W)
+
+    matched_report_indices: set[int] = set()
+    matched_gt_indices: set[int] = set()
     matched_pairs: list[dict] = []
+
+    for r_idx, g_idx in optimal_matches:
+        if W[r_idx, g_idx] > 500.0:
+            matched_report_indices.add(r_idx)
+            matched_gt_indices.add(g_idx)
+            edge_iou, matched_gt = best_matching_obs_info[(r_idx, g_idx)]
+            ev = reports[r_idx]
+            ev_id = getattr(ev, "event_id", "") if not isinstance(ev, dict) else ev.get("event_id", "")
+            ev_vid = getattr(ev, "video_id", "") if not isinstance(ev, dict) else ev.get("video_id", "")
+
+            matched_pairs.append({
+                "event_id": ev_id,
+                "gt_event_id": matched_gt.gt_event_id,
+                "video_id": ev_vid,
+                "iou": edge_iou,
+                "matched_gt_timestamp_ms": matched_gt.timestamp_ms,
+            })
+
+    # Unmatched ground-truth potholes are Misses (False Negatives)
+    unmatched_gt_ids = [
+        f"{gt_pothole_keys[j][0]}:{gt_pothole_keys[j][1]}"
+        for j in range(M)
+        if j not in matched_gt_indices
+    ]
+    missed_count = len(unmatched_gt_ids)
+
+    # Classify unmatched reports:
+    # If an unmatched report has a valid overlap (IoU >= thresh, time diff <= tol)
+    # with an ALREADY MATCHED physical pothole -> Duplicate Report.
+    # Otherwise -> False Positive (check negative regions for lookalike breakdown).
     duplicate_pairs: list[dict] = []
     false_reports: list[dict] = []
-
     lookalike_counts: dict[str, int] = {
         "shadow": 0,
         "repaired_patch": 0,
@@ -200,50 +406,33 @@ def evaluate_event_detections(
         "unclassified": 0,
     }
 
-    for ev in sorted_reports:
+    for i, ev in enumerate(reports):
+        if i in matched_report_indices:
+            continue
         ev_id = getattr(ev, "event_id", "") if not isinstance(ev, dict) else ev.get("event_id", "")
         ev_vid = getattr(ev, "video_id", "") if not isinstance(ev, dict) else ev.get("video_id", "")
 
-        # Get observations list or representative box
-        obs_list = getattr(ev, "observations", []) if not isinstance(ev, dict) else ev.get("observations", [])
-        if not obs_list:
-            # Fall back to representative observation
-            rep_ts = getattr(ev, "first_timestamp_ms", 0) if not isinstance(ev, dict) else ev.get("first_timestamp_ms", 0)
-            rep_x1 = getattr(ev, "rep_x1", 0) if not isinstance(ev, dict) else ev.get("rep_x1", 0)
-            rep_y1 = getattr(ev, "rep_y1", 0) if not isinstance(ev, dict) else ev.get("rep_y1", 0)
-            rep_x2 = getattr(ev, "rep_x2", 0) if not isinstance(ev, dict) else ev.get("rep_x2", 0)
-            rep_y2 = getattr(ev, "rep_y2", 0) if not isinstance(ev, dict) else ev.get("rep_y2", 0)
-            obs_list = [{"timestamp_ms": rep_ts, "x1": rep_x1, "y1": rep_y1, "x2": rep_x2, "y2": rep_y2}]
+        # Check if it overlaps any already-claimed ground-truth pothole
+        duplicate_match = None
+        for j in matched_gt_indices:
+            if W[i, j] > 500.0:
+                edge_iou, matched_gt = best_matching_obs_info[(i, j)]
+                duplicate_match = (matched_gt, edge_iou)
+                break
 
-        # 1. Match against true pothole ground truth
-        best_gt, best_iou = _find_best_gt_match(
-            obs_list, gt_list, ev_vid, temporal_tolerance_ms, iou_threshold, potholes_only=True
-        )
-
-        if best_gt is not None:
-            gt_key = (best_gt.video_id, best_gt.gt_event_id)
-            if gt_key not in claimed_gt_events:
-                # First valid report claiming this physical pothole -> True Positive
-                claimed_gt_events.add(gt_key)
-                matched_pairs.append({
-                    "event_id": ev_id,
-                    "gt_event_id": best_gt.gt_event_id,
-                    "video_id": ev_vid,
-                    "iou": best_iou,
-                    "matched_gt_timestamp_ms": best_gt.timestamp_ms,
-                })
-            else:
-                # Already claimed by another report -> Duplicate Report
-                duplicate_pairs.append({
-                    "event_id": ev_id,
-                    "gt_event_id": best_gt.gt_event_id,
-                    "video_id": ev_vid,
-                    "iou": best_iou,
-                })
+        if duplicate_match is not None:
+            gt_box, d_iou = duplicate_match
+            duplicate_pairs.append({
+                "event_id": ev_id,
+                "gt_event_id": gt_box.gt_event_id,
+                "video_id": ev_vid,
+                "iou": d_iou,
+            })
         else:
-            # 2. False Report: check if it matched any negative/look-alike annotation
+            # False Positive: check against negative ground-truth regions
+            obs_entries = report_obs_lists[i]
             best_neg, _ = _find_best_gt_match(
-                obs_list, gt_list, ev_vid, temporal_tolerance_ms, iou_threshold, potholes_only=False
+                obs_entries, gt_list, ev_vid, temporal_tolerance_ms, iou_threshold, potholes_only=False
             )
             cat = best_neg.label.strip().lower() if best_neg else "unclassified"
             if cat not in lookalike_counts:
@@ -255,23 +444,14 @@ def evaluate_event_detections(
                 "lookalike_category": cat,
             })
 
-    # Unmatched ground-truth potholes (Misses / False Negatives)
-    unmatched_gt_ids = [
-        f"{vid}:{gid}" for (vid, gid) in unique_gt_potholes.keys()
-        if (vid, gid) not in claimed_gt_events
-    ]
-    missed_count = len(unmatched_gt_ids)
-
     tp = len(matched_pairs)
     fp = len(false_reports)
     dup = len(duplicate_pairs)
-    total_retained = len(sorted_reports)
+    total_retained = len(reports)
 
     recall = (tp / total_gt_potholes) if total_gt_potholes > 0 else 0.0
-    precision = (tp / total_retained) if total_retained > 0 else 0.0
-
-    duration_min = max(0.001, float(video_duration_min))
-    false_reports_per_min = (fp + dup) / duration_min
+    precision = (tp / (tp + fp + dup)) if (tp + fp + dup) > 0 else 0.0
+    false_reports_per_min = (fp + dup) / video_duration_min
 
     return EvaluationMetrics(
         iou_threshold=iou_threshold,
