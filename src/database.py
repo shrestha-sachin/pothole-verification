@@ -114,6 +114,40 @@ CREATE INDEX IF NOT EXISTS idx_events_video_id ON events(video_id);
 CREATE INDEX IF NOT EXISTS idx_events_first_ts ON events(first_timestamp_ms);
 CREATE INDEX IF NOT EXISTS idx_detections_event_id ON detections(event_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_event_id ON reviews(event_id);
+
+CREATE TABLE IF NOT EXISTS annotated_videos (
+    job_id              TEXT PRIMARY KEY,
+    video_id            TEXT NOT NULL,
+    input_video_path    TEXT NOT NULL,
+    output_video_path   TEXT NOT NULL,
+    model_path          TEXT NOT NULL,
+    model_checkpoint    TEXT NOT NULL,
+    detector_conf       REAL NOT NULL,
+    iou_threshold       REAL NOT NULL,
+    imgsz               INTEGER NOT NULL,
+    source_fps          REAL NOT NULL,
+    source_frame_count  INTEGER NOT NULL,
+    source_width        INTEGER,
+    source_height       INTEGER,
+    source_duration_sec REAL,
+    processed_frame_count INTEGER NOT NULL,
+    output_fps          REAL NOT NULL,
+    output_frame_count  INTEGER NOT NULL,
+    output_width        INTEGER NOT NULL,
+    output_height       INTEGER NOT NULL,
+    processing_duration REAL NOT NULL,
+    effective_fps       REAL NOT NULL,
+    total_detections    INTEGER NOT NULL DEFAULT 0,
+    unique_tracks       INTEGER NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL DEFAULT 'completed',
+    error_message       TEXT,
+    ffmpeg_transcoded   INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    metadata_json       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotated_videos_video_id ON annotated_videos(video_id);
+CREATE INDEX IF NOT EXISTS idx_annotated_videos_created ON annotated_videos(created_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -728,3 +762,100 @@ class Database:
             "detections_deleted": n_detections,
             "reviews_deleted": n_reviews,
         }
+
+    # ------------------------------------------------------------------
+    # Annotated Video Persistence
+    # ------------------------------------------------------------------
+
+    def save_annotated_video(self, meta: Any) -> None:
+        """Persist an annotated video rendering job record."""
+        d = meta if isinstance(meta, dict) else meta.to_dict()
+        unique_tracks_count = len(d.get("unique_track_ids", []))
+        json_str = json.dumps(d)
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO annotated_videos (
+                    job_id, video_id, input_video_path, output_video_path,
+                    model_path, model_checkpoint, detector_conf, iou_threshold,
+                    imgsz, source_fps, source_frame_count, source_width,
+                    source_height, source_duration_sec, processed_frame_count,
+                    output_fps, output_frame_count, output_width, output_height,
+                    processing_duration, effective_fps, total_detections,
+                    unique_tracks, status, error_message, ffmpeg_transcoded,
+                    created_at, metadata_json
+                ) VALUES (
+                    :job_id, :video_id, :input_video_path, :output_video_path,
+                    :model_path, :model_checkpoint, :detector_conf, :iou_threshold,
+                    :imgsz, :source_fps, :source_frame_count, :source_width,
+                    :source_height, :source_duration_sec, :processed_frame_count,
+                    :output_fps, :output_frame_count, :output_width, :output_height,
+                    :processing_duration, :effective_fps, :total_detections,
+                    :unique_tracks, :status, :error_message, :ffmpeg_transcoded,
+                    :created_at, :metadata_json
+                )
+                """,
+                {
+                    "job_id": d["job_id"],
+                    "video_id": d["video_id"],
+                    "input_video_path": d["input_video_path"],
+                    "output_video_path": d["output_video_path"],
+                    "model_path": d.get("model_path", ""),
+                    "model_checkpoint": d.get("model_checkpoint", ""),
+                    "detector_conf": float(d.get("detector_conf", 0.35)),
+                    "iou_threshold": float(d.get("iou_threshold", 0.45)),
+                    "imgsz": int(d.get("imgsz", 640)),
+                    "source_fps": float(d.get("source_fps", 30.0)),
+                    "source_frame_count": int(d.get("source_frame_count", 0)),
+                    "source_width": int(d.get("source_width", 0)),
+                    "source_height": int(d.get("source_height", 0)),
+                    "source_duration_sec": float(d.get("source_duration_sec", 0.0)),
+                    "processed_frame_count": int(d.get("processed_frame_count", 0)),
+                    "output_fps": float(d.get("output_fps", 30.0)),
+                    "output_frame_count": int(d.get("output_frame_count", 0)),
+                    "output_width": int(d.get("output_width", 0)),
+                    "output_height": int(d.get("output_height", 0)),
+                    "processing_duration": float(d.get("processing_duration_sec", 0.0)),
+                    "effective_fps": float(d.get("effective_inference_fps", 0.0)),
+                    "total_detections": int(d.get("total_detections_drawn", 0)),
+                    "unique_tracks": unique_tracks_count,
+                    "status": d.get("status", "completed"),
+                    "error_message": d.get("error_message"),
+                    "ffmpeg_transcoded": 1 if d.get("ffmpeg_transcoded") else 0,
+                    "created_at": d.get("created_at") or self._now(),
+                    "metadata_json": json_str,
+                },
+            )
+
+    def get_annotated_videos(self, video_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Retrieve all completed annotated video records, newest first."""
+        with self._conn() as conn:
+            if video_id:
+                rows = conn.execute(
+                    "SELECT * FROM annotated_videos WHERE video_id = ? ORDER BY created_at DESC",
+                    (video_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM annotated_videos ORDER BY created_at DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_annotated_video(self, job_id: str) -> Optional[dict[str, Any]]:
+        """Retrieve a specific annotated video record by job_id."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM annotated_videos WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def delete_annotated_video(self, job_id: str) -> bool:
+        """Delete an annotated video record from database."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM annotated_videos WHERE job_id = ?",
+                (job_id,),
+            )
+            return cur.rowcount > 0
+

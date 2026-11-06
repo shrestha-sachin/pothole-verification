@@ -154,6 +154,12 @@ try:
         load_video_ground_truth,
         parse_ground_truth_csv,
     )
+    from src.video.annotated_renderer import (
+        AnnotatedVideoRenderer,
+        RenderMetadata,
+        RenderProgress,
+        is_ffmpeg_available,
+    )
 except ImportError as e:
     st.error(f"Project import failure: {e}")
     st.stop()
@@ -165,9 +171,11 @@ EVIDENCE_ROOT = PROJECT_ROOT / "results" / "evidence"
 DB_PATH = PROJECT_ROOT / "results" / "pothole_verification.db"
 LOCAL_VIDEO_DIR = PROJECT_ROOT / "data" / "raw" / "local_video"
 MODELS_DIR = PROJECT_ROOT / "models"
+ANNOTATED_VIDEOS_DIR = PROJECT_ROOT / "results" / "annotated_videos"
 
 EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+ANNOTATED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -177,9 +185,48 @@ logger = logging.getLogger(__name__)
 # State & Helpers
 # ---------------------------------------------------------------------------
 def get_db() -> Database:
-    if "db" not in st.session_state:
-        st.session_state["db"] = Database(DB_PATH)
+    db = st.session_state.get("db")
+    if db is None or not hasattr(db, "get_annotated_videos"):
+        try:
+            import importlib
+            import src.database
+            importlib.reload(src.database)
+            from src.database import Database
+            st.session_state["db"] = Database(DB_PATH)
+        except Exception:
+            from src.database import Database
+            st.session_state["db"] = Database(DB_PATH)
     return st.session_state["db"]
+
+
+def load_annotated_video_records(db: Database, video_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Load annotated video records from database and disk metadata cache."""
+    records: list[dict[str, Any]] = []
+    if hasattr(db, "get_annotated_videos"):
+        try:
+            records = db.get_annotated_videos(video_id=video_id)
+        except Exception as ex:
+            logger.warning("Error fetching annotated videos from database: %s", ex)
+            records = []
+
+    # Also merge from results/annotated_videos/*.json as safe disk discovery
+    known_job_ids = {r.get("job_id") for r in records if r.get("job_id")}
+    if ANNOTATED_VIDEOS_DIR.exists():
+        for json_file in sorted(ANNOTATED_VIDEOS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                meta = json.loads(json_file.read_text())
+                jid = meta.get("job_id")
+                vid = meta.get("video_id")
+                if video_id and vid != video_id:
+                    continue
+                if jid and jid not in known_job_ids:
+                    out_path = Path(meta.get("output_video_path", ""))
+                    if out_path.exists():
+                        records.append(meta)
+                        known_job_ids.add(jid)
+            except Exception:
+                continue
+    return records
 
 
 def init_session_state():
@@ -562,94 +609,318 @@ def page_process():
         else:
             st.info("Verifier not configured. Policy C will be reported as Unavailable.")
 
-    # ── Reprocessing Notice ──
-    preserve_reviews = True
-    if video_id_final:
-        existing_events = db.get_events(video_id=video_id_final, include_reviews=True)
-        if existing_events:
-            rev_count = sum(1 for e in existing_events if e.get("review"))
-            st.markdown(f"""
-            <div class="info-callout warning">
-              <strong>Reprocessing Notice:</strong> Video <code>{video_id_final}</code> was previously analyzed
-              ({len(existing_events)} candidate events, {rev_count} human reviews).
-              Re-running will re-segment and update candidate events.
-            </div>
-            """, unsafe_allow_html=True)
-            preserve_reviews = st.checkbox(
-                "Preserve human review decisions on reprocessing (heuristic spatiotemporal re-attachment)",
-                value=True,
-                help="Re-attaches existing human reviews to re-tracked events by spatial bounding-box overlap and timestamp proximity.",
+    # ── Step 3: Workflows & Visualization ──
+    st.markdown('<div class="section-hdr">3. Pipeline & Visualization Workflows</div>', unsafe_allow_html=True)
+
+    tab_annotated, tab_research = st.tabs(["Annotated Video Playback", "Research Event Pipeline"])
+
+    with tab_annotated:
+        st.markdown("""
+        <div class="info-callout">
+            <strong>Annotated Video Visualization:</strong> Evaluates every video frame sequentially with BoT-SORT tracking.
+            Renders green bounding boxes, confidence scores, and persistent tracking IDs synchronized to original footage.
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Check for previously completed runs
+        previous_ann_runs = load_annotated_video_records(db, video_id=video_id_final) if video_id_final else []
+        active_ann_job_id = st.session_state.get(f"active_annotated_{video_id_final}")
+
+        if previous_ann_runs:
+            st.markdown("**Previously Generated Annotated Videos**")
+            p_opts = {
+                r["job_id"]: f"{r['created_at'][:19].replace('T', ' ')} — {r['total_detections']} detections ({r['model_checkpoint']}, conf={r['detector_conf']:.2f}, {r['output_width']}x{r['output_height']})"
+                for r in previous_ann_runs
+            }
+            default_idx = 0
+            if active_ann_job_id and active_ann_job_id in p_opts:
+                default_idx = list(p_opts.keys()).index(active_ann_job_id)
+
+            chosen_job_id = st.selectbox(
+                "Select completed video playback",
+                options=list(p_opts.keys()),
+                index=default_idx,
+                format_func=lambda j: p_opts[j],
+                key=f"sel_prev_ann_{video_id_final}",
+            )
+            selected_meta = next((r for r in previous_ann_runs if r["job_id"] == chosen_job_id), None)
+            if selected_meta:
+                _render_annotated_video_view(selected_meta)
+            st.divider()
+
+        # Render New Annotated Video Form
+        with st.expander("Generate New Annotated Video", expanded=(not previous_ann_runs)):
+            st.caption("Perform full-frame inference across the complete recording with bounded memory.")
+            av_c1, av_c2 = st.columns(2)
+            with av_c1:
+                ann_conf = st.slider("Detector Confidence", 0.10, 0.90, 0.35, 0.05, key="ann_conf_slider", help="Minimum confidence required to draw bounding box.")
+            with av_c2:
+                ann_imgsz = st.selectbox("Inference Resolution (px)", [416, 640, 960, 1280], index=1, key="ann_imgsz_sel")
+
+            av_opt1, av_opt2 = st.columns(2)
+            with av_opt1:
+                ann_tracking = st.checkbox("Enable BoT-SORT tracking (displays tracking IDs)", value=True, key="ann_track_chk")
+            with av_opt2:
+                if is_ffmpeg_available():
+                    st.caption("FFmpeg is available for H.264 browser streaming.")
+                else:
+                    st.caption("FFmpeg not detected. Using OpenCV H.264 writer. Install FFmpeg (`brew install ffmpeg`) for optimal web streaming.")
+
+            can_gen_video = model_valid and (video_path_final is not None) and (model_path_obj is not None)
+            if not can_gen_video:
+                if not model_valid:
+                    st.warning("A valid fine-tuned pothole detector checkpoint must be selected.")
+                if video_path_final is None:
+                    st.warning("Please select or upload a valid road video.")
+
+            if st.button("Generate Annotated Video", icon=":material/movie:", type="primary", disabled=not can_gen_video, use_container_width=True, key="btn_gen_ann_vid"):
+                _execute_annotated_video_pipeline(
+                    db=db,
+                    video_path=video_path_final,
+                    video_id=video_id_final,
+                    model_path=model_path_obj,
+                    conf_threshold=ann_conf,
+                    imgsz=int(ann_imgsz),
+                    use_tracking=ann_tracking,
+                )
+
+    with tab_research:
+        # ── Reprocessing Notice ──
+        preserve_reviews = True
+        if video_id_final:
+            existing_events = db.get_events(video_id=video_id_final, include_reviews=True)
+            if existing_events:
+                rev_count = sum(1 for e in existing_events if e.get("review"))
+                st.markdown(f"""
+                <div class="info-callout warning">
+                  <strong>Reprocessing Notice:</strong> Video <code>{video_id_final}</code> was previously analyzed
+                  ({len(existing_events)} candidate events, {rev_count} human reviews).
+                  Re-running will re-segment and update candidate events.
+                </div>
+                """, unsafe_allow_html=True)
+                preserve_reviews = st.checkbox(
+                    "Preserve human review decisions on reprocessing (heuristic spatiotemporal re-attachment)",
+                    value=True,
+                    help="Re-attaches existing human reviews to re-tracked events by spatial bounding-box overlap and timestamp proximity.",
+                )
+
+        # ── Step 3: Advanced Settings (Collapsible) ──
+        with st.expander("Advanced Inference & Tracking Settings", expanded=False):
+            st.caption("Adjust pipeline thresholds. No single threshold is universally optimal; defaults reflect baseline capstone calibration.")
+            as1, as2, as3, as4 = st.columns(4)
+            with as1:
+                sample_fps = st.slider("Sample FPS", 1.0, 15.0, 5.0, 0.5, help="Frame extraction rate for candidate detection.")
+            with as2:
+                conf_threshold = st.slider("Detector Confidence", 0.10, 0.90, 0.35, 0.05, help="Minimum YOLO box confidence threshold.")
+            with as3:
+                iou_threshold = st.slider("NMS IoU Threshold", 0.10, 0.90, 0.45, 0.05, help="Non-maximum suppression box overlap.")
+            with as4:
+                imgsz = st.selectbox("Inference Size (px)", [416, 640, 960, 1280], index=1)
+
+            as5, as6, as7, as8 = st.columns(4)
+            with as5:
+                policy_b_min_obs = st.number_input("Policy B Min Hits", 1, 10, 2, help="Minimum actual detections required within temporal window.")
+            with as6:
+                temporal_window = st.number_input("Temporal Window (frames)", 2, 10, 5, help="Sliding window size of sampled frames.")
+            with as7:
+                verifier_thresh = st.slider("Verifier Threshold (Policy C)", 0.10, 0.90, 0.50, 0.05)
+            with as8:
+                road_segment_id = st.text_input("Road Segment ID", value="seg_001")
+
+            generate_clips = st.checkbox("Generate short evidence video clips (MP4)", value=False, help="Extracts short 3s MP4 clips around candidate events.")
+
+        # ── Step 4: Execution ──
+        st.write("")
+        can_execute = model_valid and (video_path_final is not None) and (model_path_obj is not None)
+
+        if not model_valid:
+            st.warning("A valid fine-tuned pothole detector checkpoint must be selected before processing.")
+        if video_path_final is None:
+            st.warning("Please select or upload a valid road video.")
+
+        if st.button("Execute Pipeline", icon=":material/play_arrow:", type="primary", disabled=not can_execute, use_container_width=True):
+            _execute_video_pipeline(
+                db=db,
+                video_path=video_path_final,
+                video_id=video_id_final,
+                model_path=model_path_obj,
+                verifier_path=verifier_path_final,
+                sample_fps=sample_fps,
+                conf_threshold=conf_threshold,
+                iou_threshold=iou_threshold,
+                imgsz=int(imgsz),
+                road_segment_id=road_segment_id,
+                policy_b_min_obs=int(policy_b_min_obs),
+                policy_b_window=int(temporal_window),
+                verifier_threshold=verifier_thresh,
+                preserve_reviews=preserve_reviews,
+                generate_clips=generate_clips,
             )
 
-    # ── Step 3: Advanced Settings (Collapsible) ──
-    with st.expander("Advanced Inference & Tracking Settings", expanded=False):
-        st.caption("Adjust pipeline thresholds. No single threshold is universally optimal; defaults reflect baseline capstone calibration.")
-        as1, as2, as3, as4 = st.columns(4)
-        with as1:
-            sample_fps = st.slider("Sample FPS", 1.0, 15.0, 5.0, 0.5, help="Frame extraction rate for candidate detection.")
-        with as2:
-            conf_threshold = st.slider("Detector Confidence", 0.10, 0.90, 0.35, 0.05, help="Minimum YOLO box confidence threshold.")
-        with as3:
-            iou_threshold = st.slider("NMS IoU Threshold", 0.10, 0.90, 0.45, 0.05, help="Non-maximum suppression box overlap.")
-        with as4:
-            imgsz = st.selectbox("Inference Size (px)", [416, 640, 960, 1280], index=1)
+        # ── Database Maintenance / Cleanup ──
+        with st.expander("Database Maintenance & Danger Zone", expanded=False):
+            st.caption("Destructive actions are kept separate from standard workflow and require explicit confirmation.")
+            col_cl1, col_cl2 = st.columns([3, 1])
+            with col_cl1:
+                confirm_clear = st.checkbox("I understand this will permanently delete all candidate events, reviews, and disk evidence for this video.", key="chk_clear_vid")
+            with col_cl2:
+                if st.button("Delete Video Events", icon=":material/delete:", type="secondary", disabled=not confirm_clear, use_container_width=True):
+                    if video_id_final:
+                        if hasattr(db, "delete_video_data"):
+                            db.delete_video_data(video_id_final, clear_reviews=True, reset_status=True)
+                        else:
+                            db.delete_events_for_video(video_id_final, clear_reviews=True)
+                        n_f, sz_mb = delete_evidence_disk(video_id_final)
+                        st.success(f"Cleared events and {n_f} evidence files ({sz_mb:.1f} MB) for `{video_id_final}`.")
+                        st.rerun()
 
-        as5, as6, as7, as8 = st.columns(4)
-        with as5:
-            policy_b_min_obs = st.number_input("Policy B Min Hits", 1, 10, 2, help="Minimum actual detections required within temporal window.")
-        with as6:
-            temporal_window = st.number_input("Temporal Window (frames)", 2, 10, 5, help="Sliding window size of sampled frames.")
-        with as7:
-            verifier_thresh = st.slider("Verifier Threshold (Policy C)", 0.10, 0.90, 0.50, 0.05)
-        with as8:
-            road_segment_id = st.text_input("Road Segment ID", value="seg_001")
 
-        generate_clips = st.checkbox("Generate short evidence video clips (MP4)", value=False, help="Extracts short 3s MP4 clips around candidate events.")
+def _render_annotated_video_view(meta_dict: dict[str, Any]):
+    output_path = Path(meta_dict["output_video_path"])
+    if not output_path.exists():
+        st.error(f"Annotated video file not found on disk: `{output_path}`")
+        return
 
-    # ── Step 4: Execution ──
+    st.markdown("#### Annotated Video Playback")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">FRAMES EVALUATED</div>
+            <div class="kpi-value blue">{meta_dict['processed_frame_count']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">EFFECTIVE SPEED</div>
+            <div class="kpi-value green">{meta_dict['effective_fps']:.1f} <span style="font-size:1rem;">FPS</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">DETECTIONS DRAWN</div>
+            <div class="kpi-value amber">{meta_dict['total_detections']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">UNIQUE TRACKS</div>
+            <div class="kpi-value slate">{meta_dict['unique_tracks']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.write("")
-    can_execute = model_valid and (video_path_final is not None) and (model_path_obj is not None)
+    st.video(str(output_path))
+    st.caption(
+        f"Playback: {meta_dict.get('output_width', 0)}x{meta_dict.get('output_height', 0)} @ {meta_dict.get('output_fps', 0):.1f} FPS "
+        f"— Source: {Path(meta_dict.get('input_video_path', '')).name} — Checkpoint: {meta_dict.get('model_checkpoint', '')} "
+        f"— Inference: {meta_dict.get('processing_duration', 0):.1f}s ({meta_dict.get('effective_fps', 0):.1f} FPS)"
+    )
 
-    if not model_valid:
-        st.warning("A valid fine-tuned pothole detector checkpoint must be selected before processing.")
-    if video_path_final is None:
-        st.warning("Please select or upload a valid road video.")
+    col_dl, col_blank = st.columns([1, 2])
+    with col_dl:
+        try:
+            with open(output_path, "rb") as vf:
+                video_bytes = vf.read()
+            st.download_button(
+                label="Download Annotated Video (MP4)",
+                data=video_bytes,
+                file_name=output_path.name,
+                mime="video/mp4",
+                icon=":material/download:",
+                type="primary",
+                use_container_width=True,
+            )
+        except Exception as exc:
+            st.warning(f"Could not prepare video download: {exc}")
 
-    if st.button("Execute Pipeline", icon=":material/play_arrow:", type="primary", disabled=not can_execute, use_container_width=True):
-        _execute_video_pipeline(
-            db=db,
-            video_path=video_path_final,
-            video_id=video_id_final,
-            model_path=model_path_obj,
-            verifier_path=verifier_path_final,
-            sample_fps=sample_fps,
-            conf_threshold=conf_threshold,
-            iou_threshold=iou_threshold,
-            imgsz=int(imgsz),
-            road_segment_id=road_segment_id,
-            policy_b_min_obs=int(policy_b_min_obs),
-            policy_b_window=int(temporal_window),
-            verifier_threshold=verifier_thresh,
-            preserve_reviews=preserve_reviews,
-            generate_clips=generate_clips,
+    with st.expander("Annotated Video Job Metadata & Technical Details", expanded=False):
+        meta_json = meta_dict.get("metadata_json")
+        if meta_json:
+            try:
+                st.json(json.loads(meta_json))
+            except Exception:
+                st.json(meta_dict)
+        else:
+            st.json(meta_dict)
+
+
+def _execute_annotated_video_pipeline(
+    db: Database,
+    video_path: Path,
+    video_id: str,
+    model_path: Path,
+    conf_threshold: float,
+    imgsz: int,
+    use_tracking: bool,
+):
+    from src.video.annotated_renderer import AnnotatedVideoRenderer, RenderProgress
+
+    renderer = AnnotatedVideoRenderer(output_dir=ANNOTATED_VIDEOS_DIR)
+    device = auto_device()
+
+    with st.status("Rendering Annotated Video...", expanded=True) as status:
+        st.write(f"1. Loading detector `{model_path.name}` on **{device.upper()}**...")
+        prog_bar = st.progress(0.0)
+        prog_text = st.empty()
+
+        def on_prog(p: RenderProgress):
+            prog_bar.progress(p.percent / 100.0)
+            eta_txt = f", ETA: {p.eta_sec:.1f}s" if p.eta_sec is not None else ""
+            prog_text.text(
+                f"Processing frame {p.current_frame}/{p.total_frames} ({p.percent:.0f}%) — "
+                f"Speed: {p.current_fps:.1f} FPS, Elapsed: {p.elapsed_sec:.1f}s{eta_txt}"
+            )
+
+        st.write("2. Sequential frame-by-frame inference & annotation...")
+        try:
+            meta = renderer.render_annotated_video(
+                video_path=video_path,
+                model=model_path,
+                conf_threshold=conf_threshold,
+                imgsz=imgsz,
+                device=device,
+                use_tracking=use_tracking,
+                progress_callback=on_prog,
+            )
+        except Exception as exc:
+            prog_bar.empty()
+            prog_text.empty()
+            logger.exception("Annotated video rendering failed")
+            status.update(label="Video rendering failed", state="error", expanded=False)
+            st.error(f"Annotated video rendering failed: {exc}", icon=":material/error:")
+            return
+
+        prog_bar.empty()
+        prog_text.empty()
+
+        st.write("3. Persisting rendering metadata to database...")
+        if hasattr(db, "save_annotated_video"):
+            db.save_annotated_video(meta)
+
+        # Register video in db if not already registered
+        if not db.get_video(video_id):
+            meta_dict = get_video_metadata(str(video_path))
+            meta_dict["filepath"] = str(video_path)
+            meta_dict["road_segment_id"] = "seg_001"
+            db.register_video(video_id, meta_dict)
+
+        status.update(
+            label=f"Completed in {meta.processing_duration_sec:.1f}s! ({meta.processed_frame_count} frames, {meta.total_detections_drawn} detections)",
+            state="complete",
+            expanded=False,
         )
 
-    # ── Database Maintenance / Cleanup ──
-    with st.expander("Database Maintenance & Danger Zone", expanded=False):
-        st.caption("Destructive actions are kept separate from standard workflow and require explicit confirmation.")
-        col_cl1, col_cl2 = st.columns([3, 1])
-        with col_cl1:
-            confirm_clear = st.checkbox("I understand this will permanently delete all candidate events, reviews, and disk evidence for this video.", key="chk_clear_vid")
-        with col_cl2:
-            if st.button("Delete Video Events", icon=":material/delete:", type="secondary", disabled=not confirm_clear, use_container_width=True):
-                if video_id_final:
-                    if hasattr(db, "delete_video_data"):
-                        db.delete_video_data(video_id_final, clear_reviews=True, reset_status=True)
-                    else:
-                        db.delete_events_for_video(video_id_final, clear_reviews=True)
-                    n_f, sz_mb = delete_evidence_disk(video_id_final)
-                    st.success(f"Cleared events and {n_f} evidence files ({sz_mb:.1f} MB) for `{video_id_final}`.")
-                    st.rerun()
+    st.session_state[f"active_annotated_{video_id}"] = meta.job_id
+    st.success(
+        f"Annotated video generated successfully: {meta.processed_frame_count} frames, "
+        f"{meta.total_detections_drawn} detections in {meta.processing_duration_sec:.1f}s ({meta.effective_inference_fps:.1f} FPS)."
+    )
+    st.rerun()
 
 
 def _execute_video_pipeline(**kwargs):
