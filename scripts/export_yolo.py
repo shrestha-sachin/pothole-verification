@@ -130,6 +130,7 @@ def export(output_dir: Path) -> None:
     image_paths: list[str] = []
     train_image_paths: list[str] = []
     val_image_paths: list[str] = []
+    test_image_paths: list[str] = []
 
     total = reviewed = skipped_uncertain = skipped_no_ann = exported_pos = exported_neg = 0
 
@@ -198,8 +199,10 @@ def export(output_dir: Path) -> None:
             exported_neg += 1
 
         split = inv_row.get("split", "train").strip().lower()
-        if split in ("val", "validation", "valid", "test"):
+        if split in ("val", "validation", "valid"):
             val_image_paths.append(linked_img_path)
+        elif split in ("test", "testing", "heldout"):
+            test_image_paths.append(linked_img_path)
         else:
             train_image_paths.append(linked_img_path)
 
@@ -213,16 +216,18 @@ def export(output_dir: Path) -> None:
             "is_negative": "1" if not yolo_lines else "0",
         })
 
-    # ---- image_paths.txt, train.txt, val.txt, all.txt -------------------
+    # ---- image_paths.txt, train.txt, val.txt, test.txt, all.txt --------
     paths_file = output_dir / "image_paths.txt"
     all_file = output_dir / "all.txt"
     train_file = output_dir / "train.txt"
     val_file = output_dir / "val.txt"
+    test_file = output_dir / "test.txt"
 
-    paths_file.write_text("\n".join(image_paths) + "\n", encoding="utf-8")
-    all_file.write_text("\n".join(image_paths) + "\n", encoding="utf-8")
-    train_file.write_text("\n".join(train_image_paths) + "\n", encoding="utf-8")
-    val_file.write_text("\n".join(val_image_paths) + "\n", encoding="utf-8")
+    paths_file.write_text("\n".join(image_paths) + ("\n" if image_paths else ""), encoding="utf-8")
+    all_file.write_text("\n".join(image_paths) + ("\n" if image_paths else ""), encoding="utf-8")
+    train_file.write_text("\n".join(train_image_paths) + ("\n" if train_image_paths else ""), encoding="utf-8")
+    val_file.write_text("\n".join(val_image_paths) + ("\n" if val_image_paths else ""), encoding="utf-8")
+    test_file.write_text("\n".join(test_image_paths) + ("\n" if test_image_paths else ""), encoding="utf-8")
 
     # ---- export_manifest.csv -------------------------------------------
     manifest_path = output_dir / "export_manifest.csv"
@@ -241,6 +246,7 @@ def export(output_dir: Path) -> None:
     print(f"  Exported as negatives:   {exported_neg}")
     print(f"  Train split images:      {len(train_image_paths)}")
     print(f"  Val split images:        {len(val_image_paths)}")
+    print(f"  Test split images:       {len(test_image_paths)}")
     print(f"  Skipped (uncertain):     {skipped_uncertain}")
     print(f"  Skipped (no annotation): {skipped_no_ann}")
     print(f"  Output:                  {output_dir}")

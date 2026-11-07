@@ -1,0 +1,11 @@
+# YOLO Dataset Configuration - Local Green Bay Dataset Only
+# Useful for local testing when RDD2022 has not been processed.
+path: .
+
+train: exports/yolo_labels/train.txt
+val: exports/yolo_labels/val.txt
+test: exports/yolo_labels/test.txt
+
+names:
+  0: pothole
+

@@ -28,7 +28,8 @@ vid_01,2000,100,120,180,200,defect_2,shadow
 
     def test_legacy_annotations_are_not_automatic_ground_truth(self):
         # Old files lack explicit video identity and verified physical IDs.
-        self.assertEqual(load_video_ground_truth("Green_Bay_Road_5_min"), [])
+        with self.assertRaises(ValueError):
+            load_video_ground_truth("Green_Bay_Road_5_min")
 
 
 if __name__ == "__main__":

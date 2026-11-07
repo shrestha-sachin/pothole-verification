@@ -83,6 +83,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Destination path for best trained model checkpoint (default: models/best.pt)",
     )
     parser.add_argument(
+        "--evaluate-test",
+        action="store_true",
+        help="Evaluate final model on protected held-out test split after training (never during tuning)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate dataset configuration and paths without launching training",
@@ -107,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Classes: {data_dict.get('names')}")
     print(f"  Train sources: {data_dict.get('train')}")
     print(f"  Val sources:   {data_dict.get('val')}")
+    if data_dict.get("test"):
+        print(f"  Test sources:  {data_dict.get('test')}")
 
     # Count total images in splits
     def count_images_in_sources(sources) -> int:
@@ -121,8 +128,10 @@ def main(argv: list[str] | None = None) -> None:
 
     n_train = count_images_in_sources(data_dict.get("train", []))
     n_val = count_images_in_sources(data_dict.get("val", []))
+    n_test = count_images_in_sources(data_dict.get("test", []))
     print(f"  Total train images: {n_train}")
     print(f"  Total val images:   {n_val}")
+    print(f"  Total test images:  {n_test} (held-out, protected)")
 
     if args.dry_run:
         print("\n[Dry-run passed successfully. All dataset manifests and labels resolve correctly.]")
@@ -156,6 +165,16 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  Recall:    {val_metrics.box.mr:.4f}")
         print(f"  mAP50:     {val_metrics.box.map50:.4f}")
         print(f"  mAP50-95:  {val_metrics.box.map:.4f}")
+
+    if args.evaluate_test and n_test > 0:
+        print("\n[Evaluation] Evaluating best model on held-out test set...")
+        test_metrics = model.val(data=str(data_yaml_path), split="test", device=device)
+        print("\n--- Test Metrics (Final Benchmark) ---")
+        if hasattr(test_metrics, "box"):
+            print(f"  Precision: {test_metrics.box.mp:.4f}")
+            print(f"  Recall:    {test_metrics.box.mr:.4f}")
+            print(f"  mAP50:     {test_metrics.box.map50:.4f}")
+            print(f"  mAP50-95:  {test_metrics.box.map:.4f}")
 
     # 6. Copy best weights to models/best.pt
     run_dir = Path(model.trainer.save_dir)

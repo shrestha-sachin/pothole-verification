@@ -1,8 +1,9 @@
-# YOLO Dataset Configuration - RDD2022 US (Balanced 10-20% Background Negatives)
+# YOLO Dataset Configuration - RDD2022 US (Balanced Background Negatives)
 # Subsampled hard negatives targeting alligator cracks (D20) & transverse cracks (D10)
 path: .
 train: data/processed/rdd2022/train.txt
 val: data/processed/rdd2022/val.txt
+test: data/processed/rdd2022/test.txt
 
 names:
   0: pothole

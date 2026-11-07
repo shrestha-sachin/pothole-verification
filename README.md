@@ -215,15 +215,123 @@ model decisions are made.
 
 ---
 
-## Lab computer (RTX 4090) — RDD2022 integration
+## RDD2022 Dataset Preparation & Splitting Pipeline
+
+The Road Damage Dataset 2022 (RDD2022) is used to augment the training data for single-class pothole detection (`D40` mapped to YOLO class 0).
+
+### 1. Splitting Strategy (80 / 10 / 10 Default)
+
+- **Default Split:** 80% Training, 10% Validation, and 10% Held-Out Test.
+- **Reproducibility:** Configurable random seed (defaults to `42`).
+- **Stratification:** Maintains representation of pothole-positive (`D40` present) and negative background road images across splits.
+- **Group Protection:**
+  - Prefers verified route, sequence, location, or camera metadata when available (`--metadata-csv`).
+  - Automatically identifies exact content duplicates (SHA-256 match) and guarantees that duplicate images are placed in the **exact same split** to prevent data leakage.
+  - **Honest Limitation:** Standard RDD2022 Pascal VOC XML files lack GPS or physical road sequence tags. When no external sequence logs are supplied, the converter falls back to sample grouping. Geographic independence is **not** claimed unless verified external sequence metadata is provided.
+- **Zero Leakage:** Asserts that train, validation, and test splits have 0% image ID overlap and 0% content hash overlap.
+- **Empty Split Protection:** Guarantees non-empty train, validation, and test sets.
+
+### 2. Single-Class Pothole & Negative Sample Handling
+
+- **Pothole Positive:** Any image containing `D40` (pothole), even if co-occurring with cracks (`D00`, `D10`, `D20`), remains classified as pothole-positive. In pothole-only mode, only `D40` bounding boxes are exported as class 0.
+- **Candidate Negatives:** Images containing road distress without `D40` (or clean road images) are candidate negatives **only when their XML annotations are valid**. Corrupt or malformed XML files are rejected, never treated as true negatives.
+- **Hard Negative Tiers:**
+  - **Tier 1:** Alligator crack (`D20`) + Transverse crack (`D10`)
+  - **Tier 2:** Alligator crack (`D20`)
+  - **Tier 3:** Transverse crack (`D10`)
+  - **Tier 4:** Longitudinal crack (`D00`) or clean road background
+  > **Research Note:** Crack annotations (`D10`, `D20`) serve as road distress negatives to teach YOLO not to false-alarm on surface cracks. They are **not** equivalent to the project's target video look-alikes (shadows, repaired asphalt patches, and manhole covers), which are supplied by our human-reviewed Green Bay dataset.
+- **In-Split Negative Subsampling:**
+  - Negative subsampling occurs **strictly within each assigned split** (train negatives from train candidates, val negatives from val candidates, test negatives from test candidates).
+  - Images **never cross split boundaries** to satisfy class-balance targets.
+  - Configurable ratio (e.g. `--neg-ratio 0.25` for ~20% background images, matching Ultralytics recommendations) or explicit counts (`--train-negatives`, `--val-negatives`, `--test-negatives`).
+  - Unselected candidate negatives remain in their assigned split and are tracked in `split_metadata.csv` with `selected_in_manifest=0`. Full candidate lists are preserved in `*_all_negatives.txt`.
+
+### 3. Preparation Commands (Lab Computer)
+
+Run these commands on your lab computer where RDD2022 is stored:
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# 1. Prepare US-only RDD2022 subset with 80/10/10 split and 20% background negatives
+python scripts/convert_rdd2022.py \
+    --input /path/to/RDD2022 \
+    --output data/processed/rdd2022 \
+    --countries United_States \
+    --train-split 0.80 \
+    --val-split 0.10 \
+    --test-split 0.10 \
+    --neg-ratio 0.25 \
+    --seed 42
+
+# 2. (Optional) Multi-country preparation (e.g. US + Japan)
+python scripts/convert_rdd2022.py \
+    --input /path/to/RDD2022 \
+    --output data/processed/rdd2022 \
+    --countries United_States,Japan \
+    --neg-ratio 0.25 \
+    --seed 42
+
+# 3. Dry-run inspection (inspect counts without writing files)
+python scripts/convert_rdd2022.py --input /path/to/RDD2022 --countries United_States --dry-run
+```
+
+### 4. Output Manifests & Audit Artifacts
+
+The conversion generates:
+- `data/processed/rdd2022/train.txt`: List of absolute paths for training images
+- `data/processed/rdd2022/val.txt`: List of absolute paths for validation images
+- `data/processed/rdd2022/test.txt`: List of absolute paths for held-out test images
+- `data/processed/rdd2022/split_metadata.csv`: Full provenance audit (image ID, country, group ID, grouping method, split, selected status, bounding box counts, negative tier, SHA-256)
+- `data/processed/rdd2022/dataset_summary.json`: Summary statistics (total images, class distribution, D40 bounding box totals per split, duplicate clusters)
+- `configs/detector_rdd_balanced.yaml`: RDD2022 dataset YAML for Ultralytics YOLO
+
+### 5. Training & Evaluating YOLO11n
+
+```bash
+# 1. Export local Green Bay human-reviewed annotations
+python scripts/export_yolo.py
+
+# 2. Dry-run validation of dataset configuration and paths
+python scripts/train_detector.py --data configs/detector_combined.yaml --dry-run
+
+# 3. Train YOLO11n on GPU with the combined dataset (50 epochs, batch 16)
+python scripts/train_detector.py \
+    --data configs/detector_combined.yaml \
+    --model yolo11n.pt \
+    --epochs 50 \
+    --batch 16 \
+    --device 0
+
+# 4. Train only on balanced RDD2022 US data
+python scripts/train_detector.py \
+    --data configs/detector_rdd_balanced.yaml \
+    --epochs 50 \
+    --batch 16 \
+    --device 0
+```
+
+### 6. Held-Out Test Set Protection
+
+> [!IMPORTANT]
+> The test split (`test.txt`) is strictly held out. Training, validation loss monitoring, early stopping, and hyperparameter tuning evaluate **exclusively** on `val.txt`.
+> The test split is never evaluated during model training to avoid data snooping and maintain research-grade evaluation integrity.
+> To run final evaluation on the held-out test set only after training is completely frozen:
+> `python scripts/train_detector.py --data configs/detector_combined.yaml --evaluate-test`
+
+---
+
+## Lab computer (RTX 4090) — GPU training setup
 
 The same code runs on the lab computer with no path changes committed:
 
 1. `git clone` (or `git pull`) the repository
 2. Place RDD2022 at any path (e.g., `/datasets/RDD2022/`)
-3. Run `scripts/convert_rdd2022.py --input /datasets/RDD2022 --output data/raw/rdd2022` (to be implemented) to convert annotations to YOLO format
-4. Run `python scripts/build_inventory.py` to add RDD2022 images to the inventory
-5. Train the detector: `yolo train model=yolov8n.pt data=configs/detector.yaml`
+3. Run `python scripts/convert_rdd2022.py --input /datasets/RDD2022 --countries United_States --neg-ratio 0.25`
+4. Run `python scripts/export_yolo.py` to ensure local annotations are exported
+5. Train the detector: `python scripts/train_detector.py --data configs/detector_combined.yaml --device 0`
 
 No machine-specific absolute paths are ever committed to the repository.
 
@@ -242,12 +350,14 @@ pothole-verification/
 │   └── annotate.py           # Streamlit annotation tool
 │
 ├── scripts/
-│   ├── build_inventory.py    # Generate data/metadata/image_inventory.csv
-│   ├── collect_mapillary.py  # Download Mapillary images
-│   ├── convert_rdd2022.py    # (stub) RDD2022 → YOLO conversion
-│   ├── export_yolo.py        # Export YOLO detection labels
-│   ├── extract_frames.py     # Extract video frames (~1/sec)
-│   └── generate_crops.py     # Generate verifier crops from annotations
+│   ├── build_inventory.py        # Generate data/metadata/image_inventory.csv
+│   ├── collect_mapillary.py      # Download Mapillary images
+│   ├── convert_rdd2022.py        # RDD2022 → YOLO conversion & 80/10/10 splitting
+│   ├── subsample_rdd_negatives.py# Subsample hard crack negatives within splits
+│   ├── export_yolo.py            # Export YOLO detection labels
+│   ├── extract_frames.py         # Extract video frames (~1/sec)
+│   ├── generate_crops.py         # Generate verifier crops from annotations
+│   └── train_detector.py         # Train and evaluate YOLO11n on GPU/CPU
 │
 ├── src/
 │   ├── annotations.py        # Annotation I/O module (shared)
