@@ -227,7 +227,7 @@ def discover_pairs(input_dir: Path, countries: list[str] | None = None) -> list[
         for xml_file in xml_candidates:
             stem = xml_file.stem
             # RDD2022: train/annotations/xmls/name.xml -> train/images/name.jpg
-            roots = [xml_file.parent.parent.parent / "images", xml_file.parent]
+            roots = [xml_file.parent.parent / "images", xml_file.parent.parent.parent / "images", xml_file.parent]
             preferred = [
                 root / f"{stem}{ext}" for root in roots
                 for ext in (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG")
@@ -363,7 +363,7 @@ def stratified_group_split(
         raise ValueError("Cannot split empty item list.")
 
     total_frac = train_split + val_split + test_split
-    if not (0.99 <= total_frac <= 1.01):
+    if min(train_split, val_split, test_split) <= 0 or not (0.999999 <= total_frac <= 1.000001):
         raise ValueError(f"Split proportions must sum to 1.0 (got {train_split}+{val_split}+{test_split} = {total_frac:.3f})")
 
     if len(items) < 3:
