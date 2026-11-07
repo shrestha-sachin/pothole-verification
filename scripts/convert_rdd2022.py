@@ -299,7 +299,8 @@ def assign_group_ids(
             current_methods.add("exact_content_duplicate")
 
         supplied_sequence = (
-            (external_metadata or {}).get(item.image_id)
+            (external_metadata or {}).get(f"{item.country}/{item.img_path.stem}")
+            or (external_metadata or {}).get(item.image_id)
             or (external_metadata or {}).get(item.img_path.stem)
         )
         if supplied_sequence:
@@ -841,7 +842,7 @@ def main(argv: list[str] | None = None) -> None:
             lines = [f"{b[0]} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f} {b[4]:.6f}" for b in it.boxes]
             lbl_file.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
-            target_img = images_dir / it.img_path.name
+            target_img = images_dir / f"{it.image_id}{it.img_path.suffix.lower()}"
             if not target_img.exists() and not target_img.is_symlink():
                 if args.copy_images:
                     import shutil
