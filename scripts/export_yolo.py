@@ -119,8 +119,27 @@ def load_annotation(image_id: str) -> dict | None:
 # Export
 # ---------------------------------------------------------------------------
 
-def export(output_dir: Path) -> None:
+def export(output_dir: Path, overwrite: bool = False) -> None:
     inventory = load_inventory()
+    if output_dir.exists() and any(output_dir.iterdir()) and not overwrite:
+        raise RuntimeError(f"Export destination is not empty: {output_dir}. Choose a versioned --output or use --overwrite.")
+
+    # Recording-level isolation is mandatory for reviewed video frames.
+    recording_splits: dict[str, set[str]] = {}
+    valid_splits = {"train", "val", "validation", "valid", "test", "testing", "heldout"}
+    for image_id, row in inventory.items():
+        if row.get("review_status") != "reviewed":
+            continue
+        split = row.get("split", "").strip().lower()
+        if split not in valid_splits:
+            raise ValueError(f"Invalid or missing split {split!r} for reviewed image {image_id}")
+        normalized = "val" if split in {"validation", "valid"} else "test" if split in {"testing", "heldout"} else split
+        recording = row.get("recording_id", "").strip()
+        if recording:
+            recording_splits.setdefault(recording, set()).add(normalized)
+    conflicts = {k: sorted(v) for k, v in recording_splits.items() if len(v) > 1}
+    if conflicts:
+        raise ValueError(f"Recording-level data leakage: recording IDs appear in multiple splits: {conflicts}")
     labels_dir = output_dir / "labels"
     images_dir = output_dir / "images"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -198,7 +217,7 @@ def export(output_dir: Path) -> None:
         else:
             exported_neg += 1
 
-        split = inv_row.get("split", "train").strip().lower()
+        split = inv_row.get("split", "").strip().lower()
         if split in ("val", "validation", "valid"):
             val_image_paths.append(linked_img_path)
         elif split in ("test", "testing", "heldout"):
@@ -309,6 +328,8 @@ def main() -> None:
         metavar="DIR",
         help=f"Output directory (default: {rel(DEFAULT_OUTPUT)})",
     )
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Explicitly replace existing export files")
     parser.add_argument(
         "--validate",
         action="store_true",
@@ -320,7 +341,7 @@ def main() -> None:
         run_validation()
         return
 
-    export(Path(args.output))
+    export(Path(args.output), overwrite=args.overwrite)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import torch
@@ -82,6 +84,14 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_OUTPUT_MODEL,
         help="Destination path for best trained model checkpoint (default: models/best.pt)",
     )
+    parser.add_argument("--experiment-name", type=str, default=None,
+                        help="Unique run name; defaults to a UTC timestamp")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Explicitly allow overwriting an existing run and checkpoint")
+    parser.add_argument("--evaluate-only", action="store_true",
+                        help="Evaluate an existing --model checkpoint without training or modifying weights")
+    parser.add_argument("--split", choices=["val", "test"], default="test",
+                        help="Split to use with --evaluate-only (default: test)")
     parser.add_argument(
         "--evaluate-test",
         action="store_true",
@@ -94,6 +104,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = parser.parse_args(argv)
+    if args.evaluate_only and args.evaluate_test:
+        parser.error("--evaluate-only and --evaluate-test cannot be combined")
+    if args.evaluate_only and not Path(args.model).is_file():
+        parser.error("--evaluate-only requires --model pointing to an existing checkpoint")
 
     # 1. Device selection
     if args.device:
@@ -134,8 +148,33 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Total test images:  {n_test} (held-out, protected)")
 
     if args.dry_run:
-        print("\n[Dry-run passed successfully. All dataset manifests and labels resolve correctly.]")
+        print("\n[Dry-run passed successfully. Dataset YAML parsed; inspect reported counts before training.]")
         return
+
+    if args.evaluate_only:
+        if args.split == "test" and (not data_dict.get("test") or n_test == 0):
+            sys.exit("ERROR: Held-out test split is unavailable or empty.")
+        if args.split == "val" and n_val == 0:
+            sys.exit("ERROR: Validation split is empty.")
+        print(f"\n[Evaluation only] Loading {args.model} for {args.split} evaluation; no training.")
+        metrics = YOLO(args.model).val(data=str(data_yaml_path), split=args.split, device=device)
+        if hasattr(metrics, "box"):
+            print(f"  Precision: {metrics.box.mp:.4f}")
+            print(f"  Recall:    {metrics.box.mr:.4f}")
+            print(f"  mAP50:     {metrics.box.map50:.4f}")
+            print(f"  mAP50-95:  {metrics.box.map:.4f}")
+        return
+
+    run_name = args.experiment_name or datetime.now(timezone.utc).strftime("pothole_%Y%m%dT%H%M%S_%fZ")
+    if not run_name or Path(run_name).name != run_name or run_name in {".", ".."}:
+        parser.error("--experiment-name must be a single directory name")
+    run_dir_target = PROJECT_ROOT / "runs" / "detect" / run_name
+    if run_dir_target.exists() and not args.overwrite:
+        sys.exit(f"ERROR: Run already exists: {run_dir_target}. Choose another --experiment-name.")
+    if args.output.exists() and not args.overwrite:
+        sys.exit(f"ERROR: Checkpoint already exists: {args.output}. Choose a versioned --output, or explicitly pass --overwrite.")
+    if args.evaluate_test and (not data_dict.get("test") or n_test == 0):
+        sys.exit("ERROR: --evaluate-test requested but held-out test split is missing or empty.")
 
     # 3. Load base model
     print(f"\n[Model] Loading base weights: {args.model}")
@@ -151,8 +190,8 @@ def main(argv: list[str] | None = None) -> None:
         workers=args.workers,
         device=device,
         project=str(PROJECT_ROOT / "runs" / "detect"),
-        name="pothole_combined",
-        exist_ok=True,
+        name=run_name,
+        exist_ok=args.overwrite,
     )
 
     # 5. Evaluate on held-out validation set
@@ -182,9 +221,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if best_weights_path.exists():
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(best_weights_path, args.output)
+        # Exclusive creation prevents accidental overwrite even if a second process
+        # created the checkpoint after the preflight check.
+        with best_weights_path.open("rb") as source, args.output.open("wb" if args.overwrite else "xb") as destination:
+            shutil.copyfileobj(source, destination)
         print(f"\n[OK] Copied best model weights to: {args.output}")
-        print("  The Streamlit dashboard (dashboard/app.py) will now use this checkpoint!")
+        print("  The Streamlit dashboard may use this checkpoint when configured to do so.")
     else:
         print(f"\n[WARN] Best weights file not found at expected location: {best_weights_path}")
 
