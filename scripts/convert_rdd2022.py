@@ -192,58 +192,59 @@ def parse_voc_xml(
 
 
 def discover_pairs(input_dir: Path, countries: list[str] | None = None) -> list[tuple[Path, Path, str]]:
-    """Locate all (image_path, xml_path, country) pairs in the RDD2022 dataset."""
+    """Discover image/XML pairs with a one-time image index for each country.
+
+    Match the normal RDD2022 train/images location first; do not perform a
+    recursive filesystem search for every single annotation.
+    """
     pairs: list[tuple[Path, Path, str]] = []
+    country_dirs = sorted(p for p in input_dir.iterdir() if p.is_dir())
 
-    # Check for country subdirectories
-    subdirs = [d for d in input_dir.iterdir() if d.is_dir()]
-    country_dirs = []
     if countries:
-        country_set = {c.strip().lower() for c in countries if c.strip()}
-        for d in subdirs:
-            if d.name.lower() in country_set:
-                country_dirs.append(d)
+        requested = {c.strip().lower() for c in countries}
+        matched = [d for d in country_dirs if d.name.lower() in requested]
+        if not matched:
+            raise ValueError(
+                f"No requested country folders found in {input_dir}: {sorted(requested)}"
+            )
+        search_dirs = matched
     else:
-        country_dirs = subdirs
-
-    search_dirs = country_dirs if country_dirs else [input_dir]
+        search_dirs = country_dirs or [input_dir]
 
     for cdir in search_dirs:
         country_name = cdir.name if cdir != input_dir else "general"
-
-        # Search for XML folders
-        xml_candidates = list(cdir.rglob("annotations/xmls/*.xml"))
+        xml_candidates = sorted(cdir.rglob("annotations/xmls/*.xml"))
         if not xml_candidates:
-            xml_candidates = list(cdir.rglob("*.xml"))
+            xml_candidates = sorted(cdir.rglob("*.xml"))
+
+        image_index: dict[str, list[Path]] = {}
+        for candidate in cdir.rglob("*"):
+            if candidate.is_file() and candidate.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+                image_index.setdefault(candidate.stem, []).append(candidate)
+        for images in image_index.values():
+            images.sort(key=lambda p: p.as_posix())
 
         for xml_file in xml_candidates:
             stem = xml_file.stem
-            parent = xml_file.parent
-            # Typical locations: ../images/{stem}.jpg, or same dir, or ../../images/
-            img_candidates = [
-                parent.parent / "images" / f"{stem}.jpg",
-                parent.parent / "images" / f"{stem}.png",
-                parent.parent / "images" / f"{stem}.jpeg",
-                parent / f"{stem}.jpg",
-                parent / f"{stem}.png",
-                parent / f"{stem}.jpeg",
+            # RDD2022: train/annotations/xmls/name.xml -> train/images/name.jpg
+            roots = [xml_file.parent.parent.parent / "images", xml_file.parent]
+            preferred = [
+                root / f"{stem}{ext}" for root in roots
+                for ext in (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG")
             ]
-            img_file = next((p for p in img_candidates if p.exists()), None)
-            if not img_file:
-                # Broader search in cdir
-                found = (
-                    list(cdir.rglob(f"{stem}.jpg"))
-                    + list(cdir.rglob(f"{stem}.png"))
-                    + list(cdir.rglob(f"{stem}.jpeg"))
-                )
-                if found:
-                    img_file = found[0]
-
-            if img_file and img_file.exists():
+            img_file = next((p for p in preferred if p.is_file()), None)
+            if img_file is None:
+                candidates = image_index.get(stem, [])
+                if len(candidates) == 1:
+                    img_file = candidates[0]
+                elif len(candidates) > 1:
+                    print(f"  [WARN] Ambiguous image matches for {xml_file}; skipping")
+                    continue
+            if img_file is not None:
                 pairs.append((img_file, xml_file, country_name))
 
+    pairs.sort(key=lambda entry: (entry[2], entry[0].as_posix(), entry[1].as_posix()))
     return pairs
-
 
 def classify_negative_tier(class_counts: dict[str, int]) -> str:
     """Classify negative image into hardness tiers based on crack damage types.
@@ -263,36 +264,84 @@ def classify_negative_tier(class_counts: dict[str, int]) -> str:
         return "Tier 4: Other background"
 
 
-def resolve_group_id(
-    item_id: str,
-    country: str,
-    sha256: str,
-    duplicates_map: dict[str, list[str]],
+def assign_group_ids(
+    items: list[RDDItem],
     external_metadata: dict[str, str] | None = None,
-) -> tuple[str, str]:
-    """Resolve grouping identifier and document the exact method used.
+) -> set[str]:
+    """Union exact duplicates AND all declared sequence/route relationships.
 
-    Priority:
-    1. External verified sequence/route metadata if provided.
-    2. Explicit filename sequence token (e.g. seq01, segment_02, route_A).
-    3. Exact content duplicates grouped together (keeps duplicate content in same split).
-    4. Fallback: individual sample grouping with documented limitation.
+    A duplicate appearing in two different sequences links both sequences into
+    one connected component, preventing an exact-duplicate split from breaking
+    sequence protection. Filename-only grouping is heuristic, not proof of
+    geographic independence.
     """
-    if external_metadata and item_id in external_metadata:
-        return f"{country}_{external_metadata[item_id]}", "verified_metadata"
+    parent = list(range(len(items)))
 
-    # Check exact content duplicate cluster (identical images must remain in the same split)
-    if len(duplicates_map.get(sha256, [])) > 1:
-        return f"dup_{sha256[:12]}", "exact_content_duplicate"
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
 
-    # Check for explicit sequence or segment pattern in filename
-    seq_match = re.search(r"(?:seq|sequence|segment|track|route)[-_]?([a-zA-Z0-9]+)", item_id, re.IGNORECASE)
-    if seq_match:
-        return f"{country}_seq_{seq_match.group(1)}", "filename_sequence_tag"
+    def union(a: int, b: int) -> None:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[max(root_a, root_b)] = min(root_a, root_b)
 
-    # Fallback: Individual sample grouping (honest documentation: no physical sequence assumed)
-    return f"{country}_{item_id}", "sample_fallback_no_sequence_metadata"
+    seen_hash: dict[str, int] = {}
+    seen_sequence: dict[tuple[str, str, str], int] = {}
+    methods: list[set[str]] = []
+    for idx, item in enumerate(items):
+        current_methods: set[str] = set()
+        previous_hash = seen_hash.setdefault(item.sha256, idx)
+        if previous_hash != idx:
+            union(idx, previous_hash)
+            current_methods.add("exact_content_duplicate")
 
+        supplied_sequence = (
+            (external_metadata or {}).get(item.image_id)
+            or (external_metadata or {}).get(item.img_path.stem)
+        )
+        if supplied_sequence:
+            key = ("metadata", item.country, supplied_sequence)
+            current_methods.add("supplied_sequence_metadata")
+        else:
+            match = re.search(
+                r"(?:seq(?:uence)?|segment|track|route)[-_]?([a-zA-Z0-9]+)",
+                item.image_id, re.IGNORECASE,
+            )
+            key = ("filename", item.country, match.group(1).lower()) if match else None
+            if key:
+                current_methods.add("filename_sequence_tag")
+
+        if key is not None:
+            previous_seq = seen_sequence.setdefault(key, idx)
+            if previous_seq != idx:
+                union(idx, previous_seq)
+
+        methods.append(current_methods)
+
+    components: dict[int, list[int]] = {}
+    for idx in range(len(items)):
+        components.setdefault(find(idx), []).append(idx)
+
+    used: set[str] = set()
+    for members in components.values():
+        stable_keys = sorted(f"{items[i].country}/{items[i].image_id}" for i in members)
+        group_hash = hashlib.sha256("\n".join(stable_keys).encode("utf-8")).hexdigest()[:20]
+        group_id = f"group_{group_hash}"
+        group_methods = set().union(*(methods[i] for i in members))
+        if len(members) > 1 and len({items[i].sha256 for i in members}) < len(members):
+            group_methods.add("exact_content_duplicate")
+        if not group_methods:
+            group_methods.add("sample_fallback_no_sequence_metadata")
+        method = "+".join(sorted(group_methods))
+        for i in members:
+            items[i].group_id = group_id
+            items[i].grouping_method = method
+        used.update(group_methods)
+
+    return used
 
 def stratified_group_split(
     items: list[RDDItem],
@@ -319,6 +368,9 @@ def stratified_group_split(
 
     if len(items) < 3:
         raise ValueError(f"Dataset has only {len(items)} items; at least 3 items are required for train/val/test splits.")
+    unique_groups = {it.group_id for it in items}
+    if len(unique_groups) < 3:
+        raise ValueError(f"Only {len(unique_groups)} independent groups found; need at least 3 groups for train/val/test.")
 
     # Group items by group_id
     groups: dict[str, list[RDDItem]] = {}
@@ -592,14 +644,35 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true", help="Inspect and count annotations without saving")
     parser.add_argument("--copy-images", action="store_true",
                         help="Copy images to output directory (default: symlink to avoid disk bloat)")
-    parser.add_argument("--config-yaml", type=Path, default=PROJECT_ROOT / "configs" / "detector_rdd_balanced.yaml",
-                        help="Path to generated detector YAML config (default: configs/detector_rdd_balanced.yaml)")
+    parser.add_argument("--config-yaml", type=Path, default=None,
+                        help="YAML output location (default: <output>/dataset.yaml; never overwrites a tracked config)")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Explicitly allow replacement of existing generated outputs (not recommended for research splits)")
 
     args = parser.parse_args(argv)
 
     input_dir: Path = args.input.resolve()
-    if not input_dir.exists():
+    if not input_dir.is_dir():
         sys.exit(f"ERROR: Input directory does not exist: {input_dir}")
+
+    out_dir = args.output.resolve()
+    config_yaml = (args.config_yaml or (out_dir / "dataset.yaml")).resolve()
+    if out_dir == input_dir or out_dir in input_dir.parents or input_dir in out_dir.parents:
+        sys.exit("ERROR: Output must be separate from, and not contain, the raw source dataset.")
+    if not args.dry_run and not args.overwrite:
+        if out_dir.exists() and any(out_dir.iterdir()):
+            sys.exit(
+                f"ERROR: Output directory is not empty: {out_dir}. "
+                "Choose a new versioned --output path to preserve existing splits. "
+                "Use --overwrite only after making a backup."
+            )
+        if config_yaml.exists():
+            sys.exit(
+                f"ERROR: Dataset YAML already exists: {config_yaml}. "
+                "Choose a new --config-yaml path, or explicitly use --overwrite."
+            )
+    if args.neg_ratio is not None and args.neg_ratio < 0:
+        sys.exit("ERROR: --neg-ratio must be non-negative.")
 
     countries = [c.strip() for c in args.countries.split(",") if c.strip()] if args.countries else None
 
@@ -672,21 +745,24 @@ def main(argv: list[str] | None = None) -> None:
         )
         raw_items.append(it)
 
-    # Assign group IDs
-    dup_clusters = {h: ids for h, ids in hash_to_ids.items() if len(ids) > 1}
-    grouping_methods_used: set[str] = set()
-
+    # Disambiguate colliding image IDs before producing label paths. This matters
+    # when multiple countries use generic filenames such as image_0001.jpg.
+    seen_ids: dict[str, int] = {}
     for it in raw_items:
-        gid, gmethod = resolve_group_id(
-            item_id=it.image_id,
-            country=it.country,
-            sha256=it.sha256,
-            duplicates_map=hash_to_ids,
-            external_metadata=external_metadata,
-        )
-        it.group_id = gid
-        it.grouping_method = gmethod
-        grouping_methods_used.add(gmethod)
+        seen_ids[it.image_id] = seen_ids.get(it.image_id, 0) + 1
+    for it in raw_items:
+        if seen_ids[it.image_id] > 1:
+            original_id = it.image_id
+            relative_path = it.img_path.relative_to(input_dir).as_posix()
+            suffix = hashlib.sha256(relative_path.encode("utf-8")).hexdigest()[:10]
+            it.image_id = f"{it.country}__{original_id}__{suffix}"
+
+    # Group by connected components of all duplicate and sequence relationships.
+    hash_to_ids = {}
+    for it in raw_items:
+        hash_to_ids.setdefault(it.sha256, []).append(it.image_id)
+    dup_clusters = {h: ids for h, ids in hash_to_ids.items() if len(ids) > 1}
+    grouping_methods_used = assign_group_ids(raw_items, external_metadata)
 
     pos_count = sum(1 for it in raw_items if it.has_pothole)
     neg_count = sum(1 for it in raw_items if not it.has_pothole)
@@ -729,27 +805,26 @@ def main(argv: list[str] | None = None) -> None:
     # Apply in-split negative subsampling
     train_items = subsample_negatives_in_split(
         train_items,
-        target_count=args.train_negatives,
+        target_count=None if args.keep_all_negatives else args.train_negatives,
         neg_ratio=None if args.keep_all_negatives else args.neg_ratio,
         seed=args.seed,
     )
     val_items = subsample_negatives_in_split(
         val_items,
-        target_count=args.val_negatives,
+        target_count=None if args.keep_all_negatives else args.val_negatives,
         neg_ratio=None if args.keep_all_negatives else args.neg_ratio,
         seed=args.seed + 1,
     )
     test_items = subsample_negatives_in_split(
         test_items,
-        target_count=args.test_negatives,
+        target_count=None if args.keep_all_negatives else args.test_negatives,
         neg_ratio=None if args.keep_all_negatives else args.neg_ratio,
         seed=args.seed + 2,
     )
 
     all_processed_items = train_items + val_items + test_items
 
-    # Export images and YOLO labels
-    out_dir = args.output.resolve()
+    # Export images and YOLO labels to the protected output location.
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def export_split(split_items: list[RDDItem], split_name: str) -> tuple[list[str], list[str]]:
@@ -931,7 +1006,6 @@ def main(argv: list[str] | None = None) -> None:
     print(f"[OK] Wrote dataset statistics summary to: {summary_path}")
 
     # Generate detector YAML config
-    config_yaml = Path(args.config_yaml).resolve()
     write_yolo_yaml(config_yaml, out_dir, train_txt, val_txt, test_txt, class_names)
 
     print("\n[SUCCESS] RDD2022 dataset conversion and splitting complete:")
