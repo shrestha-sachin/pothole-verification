@@ -151,9 +151,9 @@ with heading:
     st.caption(f"Image {idx+1} of {len(ids)} · {annotation.get('review_status','unreviewed').title()} · {row.get('source','Local footage')}")
 with nav:
     left,right=st.columns(2)
-    if left.button('Previous', icon=':material/chevron_left:', disabled=idx==0, use_container_width=True):
+    if left.button('Previous', icon=':material/chevron_left:', disabled=idx==0, width='stretch'):
         st.session_state['annotation_pending_image']=ids[idx-1]; st.rerun()
-    if right.button('Next', icon=':material/chevron_right:', disabled=idx==len(ids)-1, use_container_width=True):
+    if right.button('Next', icon=':material/chevron_right:', disabled=idx==len(ids)-1, width='stretch'):
         st.session_state['annotation_pending_image']=ids[idx+1]; st.rerun()
 
 path = PROJECT_ROOT / row['filepath']
@@ -302,8 +302,8 @@ with st.form('review_'+chosen, border=False):
         timestamp_input=st.text_input('Source timestamp (milliseconds)',value=timestamp)
         verified=st.checkbox('I verified this frame’s physical pothole IDs and source alignment',value=annotation.get('ground_truth_verified',False))
     save,advance=st.columns(2)
-    saved=save.form_submit_button('Save review',icon=':material/check:',use_container_width=True)
-    next_saved=advance.form_submit_button('Save review & next',type='primary',icon=':material/arrow_forward:',use_container_width=True)
+    saved=save.form_submit_button('Save review',icon=':material/check:',width='stretch')
+    next_saved=advance.form_submit_button('Save review & next',type='primary',icon=':material/arrow_forward:',width='stretch')
     if saved or next_saved:
         # Read the latest document: the canvas fragment may have updated it independently.
         updated={**st.session_state[key], 'review_status':disposition,'uncertain':disposition=='uncertain',

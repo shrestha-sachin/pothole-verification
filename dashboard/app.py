@@ -410,18 +410,18 @@ def page_overview():
         with col_act1:
             st.warning(f"There are **{unreviewed_count} unreviewed candidate events** awaiting inspection.")
         with col_act2:
-            if st.button("Review Events Now", icon=":material/fact_check:", type="primary", use_container_width=True):
+            if st.button("Review Events Now", icon=":material/fact_check:", type="primary", width="stretch"):
                 st.session_state["pending_nav_page"] = "Review Events"
                 st.rerun()
     else:
         st.success("All proposed candidate events have been reviewed! You can evaluate results or export reports.")
         col_e1, col_e2 = st.columns(2)
         with col_e1:
-            if st.button("View Research Evaluation", use_container_width=True):
+            if st.button("View Research Evaluation", width="stretch"):
                 st.session_state["pending_nav_page"] = "Evaluation"
                 st.rerun()
         with col_e2:
-            if st.button("Export Results", use_container_width=True):
+            if st.button("Export Results", width="stretch"):
                 st.session_state["pending_nav_page"] = "Export"
                 st.rerun()
 
@@ -460,7 +460,7 @@ def page_overview():
             v_disp = vdf[cols].copy()
             if "duration_sec" in v_disp.columns:
                 v_disp["duration_sec"] = v_disp["duration_sec"].apply(lambda v: f"{v:.1f}s" if pd.notna(v) else "—")
-            st.dataframe(v_disp, use_container_width=True, hide_index=True)
+            st.dataframe(v_disp, width="stretch", hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -530,7 +530,7 @@ def page_process():
                 ok, frame = cap.read()
                 cap.release()
                 if ok:
-                    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), caption=video_path_final.name, use_container_width=True)
+                    st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), caption=video_path_final.name, width="stretch")
 
     # ── Step 2: Select YOLO Checkpoint ──
     st.markdown('<div class="section-hdr">2. Detector & Verifier Checkpoints</div>', unsafe_allow_html=True)
@@ -673,7 +673,7 @@ def page_process():
                 if video_path_final is None:
                     st.warning("Please select or upload a valid road video.")
 
-            if st.button("Generate Annotated Video", icon=":material/movie:", type="primary", disabled=not can_gen_video, use_container_width=True, key="btn_gen_ann_vid"):
+            if st.button("Generate Annotated Video", icon=":material/movie:", type="primary", disabled=not can_gen_video, width="stretch", key="btn_gen_ann_vid"):
                 _execute_annotated_video_pipeline(
                     db=db,
                     video_path=video_path_final,
@@ -738,7 +738,7 @@ def page_process():
         if video_path_final is None:
             st.warning("Please select or upload a valid road video.")
 
-        if st.button("Execute Pipeline", icon=":material/play_arrow:", type="primary", disabled=not can_execute, use_container_width=True):
+        if st.button("Execute Pipeline", icon=":material/play_arrow:", type="primary", disabled=not can_execute, width="stretch"):
             _execute_video_pipeline(
                 db=db,
                 video_path=video_path_final,
@@ -764,7 +764,7 @@ def page_process():
             with col_cl1:
                 confirm_clear = st.checkbox("I understand this will permanently delete all candidate events, reviews, and disk evidence for this video.", key="chk_clear_vid")
             with col_cl2:
-                if st.button("Delete Video Events", icon=":material/delete:", type="secondary", disabled=not confirm_clear, use_container_width=True):
+                if st.button("Delete Video Events", icon=":material/delete:", type="secondary", disabled=not confirm_clear, width="stretch"):
                     if video_id_final:
                         if hasattr(db, "delete_video_data"):
                             db.delete_video_data(video_id_final, clear_reviews=True, reset_status=True)
@@ -833,7 +833,7 @@ def _render_annotated_video_view(meta_dict: dict[str, Any]):
                 mime="video/mp4",
                 icon=":material/download:",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
         except Exception as exc:
             st.warning(f"Could not prepare video download: {exc}")
@@ -1209,7 +1209,6 @@ def page_review_events():
         selected_id = st.radio(
             "Select event to review",
             options=valid_ids,
-            index=selected_index,
             format_func=lambda eid: format_event_label(event_map[eid]),
             label_visibility="collapsed",
             key="selected_event_id",
@@ -1245,11 +1244,11 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
     with col_nav:
         nc1, nc2 = st.columns(2)
         with nc1:
-            if st.button("Previous", icon=":material/chevron_left:", disabled=(cur_idx == 0), use_container_width=True, key=f"btn_prev_{eid}"):
+            if st.button("Previous", icon=":material/chevron_left:", disabled=(cur_idx == 0), width="stretch", key=f"btn_prev_{eid}"):
                 st.session_state["pending_selected_event_id"] = candidate_list[cur_idx - 1]["event_id"]
                 st.rerun()
         with nc2:
-            if st.button("Next", icon=":material/chevron_right:", disabled=(cur_idx >= len(candidate_list) - 1), use_container_width=True, key=f"btn_next_{eid}"):
+            if st.button("Next", icon=":material/chevron_right:", disabled=(cur_idx >= len(candidate_list) - 1), width="stretch", key=f"btn_next_{eid}"):
                 st.session_state["pending_selected_event_id"] = candidate_list[cur_idx + 1]["event_id"]
                 st.rerun()
 
@@ -1264,14 +1263,14 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
     with col_crop:
         st.caption("Selected evidence crop")
         if crop_path and Path(crop_path).exists():
-            st.image(crop_path, use_container_width=True)
+            st.image(crop_path, width="stretch")
         else:
             st.info("No crop image file found.")
 
     with col_frame:
         st.caption("Full frame context")
         if full_path and Path(full_path).exists():
-            st.image(full_path, use_container_width=True)
+            st.image(full_path, width="stretch")
         else:
             st.info("No full-frame image file found.")
 
@@ -1379,7 +1378,7 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
 
         rc1, rc2, rc3 = st.columns(3)
         with rc1:
-            if st.button("Save Decision", icon=":material/check:", type="primary", use_container_width=True, key=f"btn_save_{eid}"):
+            if st.button("Save Decision", icon=":material/check:", type="primary", width="stretch", key=f"btn_save_{eid}"):
                 if new_decision == "unreviewed":
                     db.delete_review(eid)
                 else:
@@ -1388,7 +1387,7 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
                 st.rerun()
 
         with rc2:
-            if st.button("Save & Next Unreviewed", icon=":material/playlist_add_check:", use_container_width=True, key=f"btn_save_next_{eid}"):
+            if st.button("Save & Next Unreviewed", icon=":material/playlist_add_check:", width="stretch", key=f"btn_save_next_{eid}"):
                 if new_decision == "unreviewed":
                     db.delete_review(eid)
                 else:
@@ -1403,7 +1402,7 @@ def _render_event_detail_panel(ev: dict, db: Database, candidate_list: list[dict
                 st.rerun()
 
         with rc3:
-            if st.button("Clear Review", icon=":material/undo:", use_container_width=True, key=f"btn_clear_{eid}"):
+            if st.button("Clear Review", icon=":material/undo:", width="stretch", key=f"btn_clear_{eid}"):
                 db.delete_review(eid)
                 st.session_state["pending_clear_event"] = eid
                 st.session_state["review_notes_draft"].pop(eid, None)
@@ -1590,7 +1589,7 @@ def page_evaluation():
         },
     ]
 
-    st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(comp_data), width="stretch", hide_index=True)
 
     # ── Sensitivity Analysis (IoU 0.5 vs IoU 0.3) ──
     st.markdown('<div class="section-hdr">IoU Sensitivity Analysis (Threshold 0.5 vs. 0.3)</div>', unsafe_allow_html=True)
@@ -1607,7 +1606,7 @@ def page_evaluation():
             "Report Precision": f"{r.report_precision * 100:.1f}%",
             "False Reports / Min": f"{r.false_reports_per_minute:.2f}",
         })
-    st.dataframe(pd.DataFrame(sens_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(sens_data), width="stretch", hide_index=True)
 
     # ── Look-Alike Breakdown ──
     st.markdown('<div class="section-hdr">Look-Alike False Positive Breakdown (Policy B)</div>', unsafe_allow_html=True)
@@ -1709,12 +1708,12 @@ def page_export():
                 file_name=filename,
                 mime="text/csv",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
             st.write("")
             preview_df = pd.read_csv(io.StringIO(csv_text))
-            st.dataframe(preview_df.head(25), use_container_width=True, hide_index=True)
+            st.dataframe(preview_df.head(25), width="stretch", hide_index=True)
         else:
             st.info("No events match the selected criteria.")
 
@@ -1786,14 +1785,13 @@ def main():
         st.divider()
 
         # Navigation
-        current_page = st.session_state.get("nav_page", "Overview")
         page_names = list(PAGES.keys())
-        idx = page_names.index(current_page) if current_page in page_names else 0
+        if st.session_state.get("nav_page") not in page_names:
+            st.session_state["nav_page"] = page_names[0]
 
         selected_page = st.radio(
             "Primary Navigation",
             options=page_names,
-            index=idx,
             key="nav_page",
             label_visibility="collapsed",
             format_func=lambda page: {"Overview": ":material/dashboard: Overview", "Process Video": ":material/video_file: Process Video", "Review Events": ":material/fact_check: Review Events", "Evaluation": ":material/analytics: Evaluation", "Export": ":material/download: Export"}[page],

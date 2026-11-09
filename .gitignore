@@ -107,6 +107,7 @@ secrets.yml
 .DS_Store
 Thumbs.db
 desktop.ini
+*.dll
 .idea/
 .vscode/
 .agents/
