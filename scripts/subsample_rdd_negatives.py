@@ -258,8 +258,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--update-primary-manifests",
         action="store_true",
-        default=True,
-        help="Update train.txt, val.txt, test.txt directly in proc-dir (backing up originals as *_all_negatives.txt)",
+        default=False,
+        help="Explicitly replace primary train/val/test manifests after backing up originals",
     )
     parser.add_argument(
         "--dry-run",
@@ -267,6 +267,8 @@ def main(argv: list[str] | None = None) -> None:
         help="Print selected samples and statistics without writing files",
     )
 
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Explicitly replace existing balanced manifests, audit CSV, or YAML")
     args = parser.parse_args(argv)
 
     proc_dir: Path = args.proc_dir.resolve()
@@ -409,6 +411,17 @@ def main(argv: list[str] | None = None) -> None:
         print("\n[Dry-run completed. No files modified.]")
         return
 
+    # Fail before writing anything if any output exists and overwrite was not requested.
+    generated_paths = [proc_dir / "train_balanced.txt", proc_dir / "val_balanced.txt", args.manifest_csv, args.yaml_config]
+    if has_test:
+        generated_paths.append(proc_dir / "test_balanced.txt")
+    existing_outputs = [str(p) for p in generated_paths if p.exists()]
+    if existing_outputs and not args.overwrite:
+        sys.exit("ERROR: Generated outputs already exist: " + ", ".join(existing_outputs)
+                 + ". Choose new output paths or pass --overwrite.")
+    if args.update_primary_manifests and not args.overwrite:
+        sys.exit("ERROR: --update-primary-manifests requires --overwrite to acknowledge replacement.")
+
     # Write audit CSV manifest
     args.manifest_csv.parent.mkdir(parents=True, exist_ok=True)
     with args.manifest_csv.open("w", newline="", encoding="utf-8") as f:
@@ -474,7 +487,12 @@ def main(argv: list[str] | None = None) -> None:
             print(f"  [OK] Updated primary {test_txt.name} ({len(new_test_lines)} images)")
 
     # Write detector YAML
-    write_balanced_yaml(args.yaml_config, train_txt, val_txt, test_txt if has_test else None)
+    write_balanced_yaml(
+        args.yaml_config,
+        train_txt if args.update_primary_manifests else train_balanced_txt,
+        val_txt if args.update_primary_manifests else val_balanced_txt,
+        (test_txt if args.update_primary_manifests else test_balanced_txt) if has_test else None,
+    )
 
     print("\n[SUCCESS] Negatives subsampled and dataset configuration ready!")
 
