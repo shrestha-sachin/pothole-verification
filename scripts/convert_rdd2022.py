@@ -45,7 +45,7 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, overload
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -102,11 +102,41 @@ def compute_file_sha256(filepath: Path) -> str:
     return hasher.hexdigest()
 
 
+BoxList = list[tuple[int, float, float, float, float]]
+
+
+@overload
+def parse_voc_xml(
+    xml_path: Path,
+    target_classes: dict[str, int],
+    return_metadata: Literal[False] = False,
+) -> tuple[int, int, BoxList] | None:
+    ...
+
+
+@overload
+def parse_voc_xml(
+    xml_path: Path,
+    target_classes: dict[str, int],
+    return_metadata: Literal[True],
+) -> tuple[int, int, BoxList, dict[str, int]] | None:
+    ...
+
+
+@overload
+def parse_voc_xml(
+    xml_path: Path,
+    target_classes: dict[str, int],
+    return_metadata: bool = ...,
+) -> tuple[int, int, BoxList] | tuple[int, int, BoxList, dict[str, int]] | None:
+    ...
+
+
 def parse_voc_xml(
     xml_path: Path,
     target_classes: dict[str, int],
     return_metadata: bool = False,
-) -> tuple[int, int, list[tuple[int, float, float, float, float]]] | tuple[int, int, list[tuple[int, float, float, float, float]], dict[str, int]] | None:
+) -> tuple[int, int, BoxList] | tuple[int, int, BoxList, dict[str, int]] | None:
     """Parse a Pascal VOC XML file and return (width, height, list of [class_id, cx, cy, w, h]).
 
     Returns None if the XML is corrupt or invalid, preventing it from being silently

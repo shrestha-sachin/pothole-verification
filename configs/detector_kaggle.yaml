@@ -1,0 +1,10 @@
+path: C:/SACHIN/Projects/pothole-verification
+names:
+  0: pothole
+train:
+- C:/SACHIN/Projects/pothole-verification/exports/yolo_labels/train.txt
+- C:/SACHIN/Projects/pothole-verification/data/processed/rdd2022/train.txt
+- C:/SACHIN/Projects/pothole-verification/data/processed/kaggle_arcioni_v4/train.txt
+val:
+- C:/SACHIN/Projects/pothole-verification/exports/yolo_labels/val.txt
+- C:/SACHIN/Projects/pothole-verification/data/processed/rdd2022/val.txt

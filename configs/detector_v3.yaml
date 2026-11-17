@@ -1,0 +1,17 @@
+# YOLO Dataset Configuration - Experiment V3 (Multi-Country RDD + Local Green Bay)
+# Protected recording-level splits for Green Bay + 80/10/10 stratified RDD2022 V3
+path: .
+
+train:
+  - exports/yolo_labels/train.txt
+  - data/processed/rdd2022_v3/train.txt
+
+val:
+  - exports/yolo_labels/val.txt
+  - data/processed/rdd2022_v3/val.txt
+
+test:
+  - data/processed/rdd2022_v3/test.txt
+
+names:
+  0: pothole

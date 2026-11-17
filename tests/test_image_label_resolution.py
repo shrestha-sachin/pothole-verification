@@ -17,7 +17,7 @@ class TestImageLabelResolution(unittest.TestCase):
         train_txt = PROJECT_ROOT / "exports" / "yolo_labels" / "train.txt"
         self.assertTrue(train_txt.exists(), f"Missing {train_txt}")
 
-        image_paths = [l.strip() for l in train_txt.read_text().splitlines() if l.strip()]
+        image_paths = [str((PROJECT_ROOT / l.strip()).resolve()) for l in train_txt.read_text().splitlines() if l.strip()]
         self.assertGreater(len(image_paths), 0, "train.txt is empty")
 
         resolved_labels = img2label_paths(image_paths)
@@ -74,6 +74,7 @@ class TestImageLabelResolution(unittest.TestCase):
             )
             res_pos = parse_voc_xml(valid_pos_xml, target_classes)
             self.assertIsNotNone(res_pos)
+            assert res_pos is not None
             w, h, boxes = res_pos
             self.assertEqual((w, h), (640, 480))
             self.assertEqual(len(boxes), 1)
@@ -87,6 +88,7 @@ class TestImageLabelResolution(unittest.TestCase):
             )
             res_neg = parse_voc_xml(valid_neg_xml, target_classes)
             self.assertIsNotNone(res_neg)
+            assert res_neg is not None
             w_neg, h_neg, boxes_neg = res_neg
             self.assertEqual((w_neg, h_neg), (640, 480))
             self.assertEqual(len(boxes_neg), 0)  # Valid true negative

@@ -1,15 +1,15 @@
-"""Reproducible training and evaluation script for YOLO11n pothole detector.
+"""Reproducible training and evaluation script for YOLO26x pothole detector.
 
-Trains on the combined dataset (Local Green Bay smartphone frames + Mapillary
-segments + balanced RDD2022 US dataset) and validates on held-out test splits.
-Automatically exports best weights to models/best.pt for the Streamlit dashboard.
+Trains on staged Local Green Bay + Mapillary + multi-country RDD2022 + Kaggle
+data with training-only negative balancing. Validates on val; test is opt-in.
+Exports best weights to a versioned checkpoint for the Streamlit dashboard.
 
 Usage:
     # Dry-run validation of dataset configuration
     python scripts/train_detector.py --dry-run
 
     # Train on GPU (if CUDA available, auto-detected) or CPU
-    python scripts/train_detector.py --epochs 50 --batch 16
+    python scripts/train_detector.py --epochs 50 --batch 4
 
     # Custom model base or device
     python scripts/train_detector.py --model yolo11n.pt --device 0 --epochs 100
@@ -29,9 +29,9 @@ from ultralytics import YOLO
 from ultralytics.data.utils import check_det_dataset
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_YAML = PROJECT_ROOT / "configs" / "detector.yaml"
-DEFAULT_BASE_MODEL = PROJECT_ROOT / "yolo11n.pt"
-DEFAULT_OUTPUT_MODEL = PROJECT_ROOT / "models" / "best.pt"
+DEFAULT_DATA_YAML = PROJECT_ROOT / "configs" / "detector_ready.yaml"
+DEFAULT_BASE_MODEL = PROJECT_ROOT / "yolo26x.pt"
+DEFAULT_OUTPUT_MODEL = PROJECT_ROOT / "models" / "yolo26x_ready_v1.pt"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -39,14 +39,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default=str(DEFAULT_BASE_MODEL if DEFAULT_BASE_MODEL.exists() else "yolo11n.pt"),
-        help="Base YOLO model weights (default: yolo11n.pt)",
+        default=str(DEFAULT_BASE_MODEL if DEFAULT_BASE_MODEL.exists() else "yolo26x.pt"),
+        help="Base YOLO model weights (default: yolo26x.pt)",
     )
     parser.add_argument(
         "--data",
         type=Path,
         default=DEFAULT_DATA_YAML,
-        help="YOLO dataset YAML config (default: configs/detector.yaml)",
+        help="YOLO dataset YAML config (default: configs/detector_ready.yaml)",
     )
     parser.add_argument(
         "--epochs",
@@ -57,8 +57,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--batch",
         type=int,
-        default=16,
-        help="Batch size (default: 16)",
+        default=4,
+        help="Batch size (default: 4, conservative starting point for YOLO26x on RTX 4090)",
     )
     parser.add_argument(
         "--workers",
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT_MODEL,
-        help="Destination path for best trained model checkpoint (default: models/best.pt)",
+        help="Destination checkpoint (default: models/yolo26x_ready_v1.pt)",
     )
     parser.add_argument("--experiment-name", type=str, default=None,
                         help="Unique run name; defaults to a UTC timestamp")
@@ -189,6 +189,17 @@ def main(argv: list[str] | None = None) -> None:
         imgsz=args.imgsz,
         workers=args.workers,
         device=device,
+        amp=True,
+        # Moderate road-scene augmentation; inspect train_batch*.jpg per run.
+        degrees=5.0,
+        shear=2.0,
+        perspective=0.0001,
+        mixup=0.05,
+        cutmix=0.1,
+        # Preserve upright road geometry. Copy-paste needs polygon labels.
+        flipud=0.0,
+        copy_paste=0.0,
+        close_mosaic=10,
         project=str(PROJECT_ROOT / "runs" / "detect"),
         name=run_name,
         exist_ok=args.overwrite,

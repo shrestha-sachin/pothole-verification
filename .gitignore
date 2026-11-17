@@ -18,6 +18,7 @@ data/raw/local_video/*
 data/raw/green_bay_images/
 data/raw/rdd2022/
 data/raw/RDD2022/
+data/raw/kaggle_cache/
 
 # Partial and temporary download artifacts
 *.part
@@ -34,12 +35,14 @@ data/backups/
 # Processed data (generated — do not commit)
 # ---------------------------------------------------------------------------
 data/processed/
+data/training/*/
 data/processes/
 *.cache
 *.cache.npy
 data/metadata/*
 !data/metadata/image_inventory.csv
 !data/metadata/rdd_subsampled_negatives.csv
+!data/metadata/rdd_dataset_manifest.csv
 !data/metadata/.gitkeep
 
 # ---------------------------------------------------------------------------

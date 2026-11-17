@@ -95,6 +95,7 @@ class TestRDD2022Conversion(unittest.TestCase):
         xml_path = self.synthetic_items[0][1]
         parsed = parse_voc_xml(xml_path, target_classes={"D40": 0})
         self.assertIsNotNone(parsed)
+        assert parsed is not None
         w, h, boxes = parsed
         self.assertEqual(w, 100)
         self.assertEqual(h, 100)
@@ -111,6 +112,7 @@ class TestRDD2022Conversion(unittest.TestCase):
         xml_path = self.synthetic_items[2][1]  # Sequence 2 has D00
         parsed = parse_voc_xml(xml_path, target_classes={"D40": 0})
         self.assertIsNotNone(parsed)
+        assert parsed is not None
         _, _, boxes = parsed
         self.assertEqual(len(boxes), 0)
 
@@ -146,13 +148,12 @@ class TestRDD2022Conversion(unittest.TestCase):
         for p_str in train_lines + val_lines:
             p = Path(p_str)
             # CRITICAL CHECK: The path in manifest MUST be inside out_dir/images, NOT rdd_dir!
-            self.assertTrue(p_str.startswith(str(self.out_dir / "images")),
+            self.assertTrue(p.resolve().is_relative_to(self.out_dir.resolve() / "images"),
                             f"Path {p_str} was dereferenced back to source instead of output directory!")
 
             # Verify Ultralytics img2label resolution rule:
             # Replace /images/ with /labels/ and .jpg with .txt
-            label_p_str = p_str.replace(f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}")
-            label_p = Path(label_p_str).with_suffix(".txt")
+            label_p = Path(str(p).replace(f"{os.sep}images{os.sep}", f"{os.sep}labels{os.sep}").replace("/images/", "/labels/")).with_suffix(".txt")
             self.assertTrue(label_p.exists(), f"Label {label_p} does not exist for manifest image {p_str}")
 
     def test_conversion_copy_images_mode(self):

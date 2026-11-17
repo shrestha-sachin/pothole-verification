@@ -288,7 +288,29 @@ The conversion generates:
 - `data/processed/rdd2022/dataset_summary.json`: Summary statistics (total images, class distribution, D40 bounding box totals per split, duplicate clusters)
 - `configs/detector_rdd_balanced.yaml`: RDD2022 dataset YAML for Ultralytics YOLO
 
-### 5. Training & Evaluating YOLO11n
+### 5. Training & Evaluating YOLO26x
+
+The default dataset is now the staged, balanced train/validation/test experiment
+in `configs/detector_ready.yaml`. See [the ready-to-train guide](docs/training_ready.md)
+for counts, verification, commands, and evaluation limitations. The explicit
+configs below remain available for older dataset comparisons.
+
+For the additional Kaggle road-damage source, download/conversion instructions
+and the combined training command are in [the dataset guide](docs/kaggle_road_dataset.md).
+
+Training defaults target the RTX 4090: `yolo26x.pt`, batch size 4, image size
+640, and automatic mixed precision. CUDA is selected automatically when
+available. Pretrained weights download on the first training run. Increase
+`--batch` only if GPU memory permits; use `--model yolo11n.pt` for a smaller model.
+
+Training also uses rotation (`degrees=5`), shear (`shear=2`), mild perspective
+(`perspective=0.0001`), MixUp (`mixup=0.05`), and CutMix (`cutmix=0.1`), alongside
+Ultralytics' default color, translation, scaling, horizontal flip, and mosaic
+augmentation. Mosaic and image mixing stop for the final 10 epochs. Vertical
+flips stay disabled to preserve upright road scenes; copy-paste stays disabled
+because the dataset uses bounding boxes rather than polygon masks. These are
+starting settings to compare against the baseline on validation data. Inspect
+each new run's `args.yaml` and `train_batch*.jpg` to review settings and examples.
 
 ```bash
 # 1. Export local Green Bay human-reviewed annotations
@@ -297,19 +319,21 @@ python scripts/export_yolo.py
 # 2. Dry-run validation of dataset configuration and paths
 python scripts/train_detector.py --data configs/detector_combined.yaml --dry-run
 
-# 3. Train YOLO11n on GPU with the combined dataset (50 epochs, batch 16)
+# 3. Train YOLO26x on GPU with the combined dataset (50 epochs, batch 4)
 python scripts/train_detector.py \
     --data configs/detector_combined.yaml \
-    --model yolo11n.pt \
+    --model yolo26x.pt \
     --epochs 50 \
-    --batch 16 \
+    --batch 4 \
+    --output models/yolo26x_combined.pt \
     --device 0
 
 # 4. Train only on balanced RDD2022 US data
 python scripts/train_detector.py \
     --data configs/detector_rdd_balanced.yaml \
     --epochs 50 \
-    --batch 16 \
+    --batch 4 \
+    --output models/yolo26x_rdd_balanced.pt \
     --device 0
 ```
 

@@ -1,5 +1,9 @@
 # Safe dataset and experiment workflow
 
+For the currently prepared combined experiment, use
+[the training-ready guide](training_ready.md). The commands below describe
+individual source-preparation workflows.
+
 This branch introduces non-destructive defaults. **Do not reuse an existing output directory** unless you explicitly intend to replace its contents.
 
 ## Prepare a new RDD2022 dataset

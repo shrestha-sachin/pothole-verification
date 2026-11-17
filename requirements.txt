@@ -19,6 +19,7 @@ streamlit>=1.45
 
 # Utilities
 pyyaml>=6.0
+kagglehub>=1.0.3
 
 # Tracking support (Hungarian algorithm for BoT-SORT)
 # Install with: pip install lapx
