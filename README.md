@@ -19,13 +19,18 @@ streamlit run dashboard/app.py
 
 Opens at `http://localhost:8501`.
 
-### Workflow
-1. **Process Video** — select your `best.pt` checkpoint and a road video, adjust FPS / confidence, click **Analyze Video**
-2. **Review Events** — inspect each grouped candidate event (image, timestamp, confidence, policy flags), confirm / reject / mark uncertain
-3. **Export** — download a CSV report with all events and review decisions
-4. **Overview** — summary statistics and charts across all processed videos
+### Everyday workflow
 
-> **Note:** The existing annotation tool is still at `streamlit run dashboard/annotate.py`
+1. **Analyze a video** - upload road footage or choose a saved recording. Use **Find potholes to review** and enter a road or area name to create a review list.
+2. **Review findings** - check the close-up, road view, and video; choose Pothole, Not a pothole, Unsure, or a possible duplicate/grouping issue. Save your decision or save and move to the next unreviewed finding.
+3. **Reports** - download a CSV with readable columns. Confirmed findings are included by default; other decisions can be included explicitly.
+4. **Watch videos** - play recordings created with **Create a video with marked potholes**. These videos show possible detections and do not create a review list or report.
+
+**Settings** holds model paths and analysis controls. Defaults use `models/best.pt` as the pothole detector; the additional image-check model is optional. Settings are saved for the installation in `configs/dashboard_settings.json` and survive navigation and app restarts. Enable **Show research tools** to access evaluation, technical scores, full analysis exports, training crop inventories, and previous run archives. This display option is not an access-control mechanism.
+
+Road names are entered by the operator. No GPS location is recorded. Findings may include repeated views of the same physical pothole, so finding totals do not establish a unique defect count. Reports retain stable finding IDs for reference.
+
+The separate annotation tool remains available with `streamlit run dashboard/annotate.py`.
 
 ---
 

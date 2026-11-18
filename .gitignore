@@ -10,6 +10,11 @@ data/raw/**/*.jpg
 data/raw/**/*.jpeg
 data/raw/**/*.png
 data/raw/**/*.webp
+data/raw/**/*.mp4
+data/raw/**/*.mov
+data/raw/**/*.avi
+data/raw/**/*.mkv
+data/raw/**/*.m4v
 data/raw/mapillary/*/images/
 
 # Video files (all video containers)
@@ -23,8 +28,11 @@ data/raw/kaggle_cache/
 # Partial and temporary download artifacts
 *.part
 *.tmp
-data/raw/**/*.part
-data/raw/**/*.tmp
+*.temp
+*.bak
+*.log
+/tmp/
+/temp/
 
 # ---------------------------------------------------------------------------
 # Backups (internal safety copies — do not commit)
@@ -54,7 +62,7 @@ data/metadata/*
 # ---------------------------------------------------------------------------
 # Exports (YOLO labels for training — tracked in git)
 # ---------------------------------------------------------------------------
-exports/
+exports/*
 !exports/.gitkeep
 
 # ---------------------------------------------------------------------------
@@ -67,7 +75,7 @@ exports/
 *.tflite
 runs/
 weights/
-models/
+models/*
 !models/.gitkeep
 checkpoints/
 
@@ -84,8 +92,13 @@ env/
 # ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 .Python
 *.egg-info/
 dist/
@@ -116,6 +129,7 @@ desktop.ini
 .agents/
 *.swp
 *.swo
+*~
 
 # ---------------------------------------------------------------------------
 # Jupyter
@@ -126,6 +140,7 @@ desktop.ini
 # Streamlit
 # ---------------------------------------------------------------------------
 .streamlit/secrets.toml
+configs/dashboard_settings.json
 
 # ---------------------------------------------------------------------------
 # Databases & Local Results (runtime artefacts — do not commit)
