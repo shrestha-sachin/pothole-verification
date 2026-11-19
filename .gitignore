@@ -24,6 +24,8 @@ data/raw/green_bay_images/
 data/raw/rdd2022/
 data/raw/RDD2022/
 data/raw/kaggle_cache/
+data/raw/RoboFlow Dataset/
+data/raw/roboflow_candidates/
 
 # Partial and temporary download artifacts
 *.part
@@ -42,8 +44,11 @@ data/backups/
 # ---------------------------------------------------------------------------
 # Processed data (generated — do not commit)
 # ---------------------------------------------------------------------------
-data/processed/
-data/training/*/
+/data/processed/
+# Staged datasets include generated reports. Keep data/training/README.md visible.
+/data/training/*/
+# Generated Experiment 2 rebuild and comparison configs. Keep the canonical config visible.
+/configs/detector_experiment_2_*.yaml
 data/processes/
 *.cache
 *.cache.npy
@@ -60,7 +65,7 @@ data/metadata/*
 
 
 # ---------------------------------------------------------------------------
-# Exports (YOLO labels for training — tracked in git)
+# Generated exports (YOLO labels for training)
 # ---------------------------------------------------------------------------
 exports/*
 !exports/.gitkeep

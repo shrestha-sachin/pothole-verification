@@ -1,0 +1,8 @@
+path: data/training/pothole_experiment_2_v2
+train: train.txt
+val: val.txt
+names:
+  0: pothole
+nc: 1
+project_relative: true
+evaluation_role: development_comparison_only

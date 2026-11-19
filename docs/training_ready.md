@@ -1,10 +1,10 @@
-# Prepared detector experiment
+# Historical V1 detector experiment
 
-`configs/detector_ready.yaml` is the new default training configuration. It uses
+`configs/detector_ready.yaml` identifies the completed V1 training configuration. It uses
 `data/training/pothole_v1/`, with explicit matching images and labels.
 Original datasets, manifests, and annotations are unchanged.
 
-This is the folder to use for the current detector experiment:
+The [Experiment 2 workflow](experiment_2_workflow.md) covers the active dataset. The historical V1 dataset has the following layout.
 
 ```text
 data/training/pothole_v1/

@@ -502,9 +502,11 @@ def load_video_ground_truth(video_id: str, project_root=None) -> list[GroundTrut
     from pathlib import Path
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     annotations = []
-    for path in sorted((root / "data/annotations/video").glob("*.json")):
+    source = root / "data/annotations"
+    paths = list((source / "video").glob("*.json")) + list((source / "experiment_2").glob("*/*.json"))
+    for path in sorted(paths):
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (ValueError, OSError):
             continue
         if data.get("video_id") != video_id:

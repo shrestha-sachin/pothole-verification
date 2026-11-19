@@ -1,8 +1,6 @@
 # Safe dataset and experiment workflow
 
-For the currently prepared combined experiment, use
-[the training-ready guide](training_ready.md). The commands below describe
-individual source-preparation workflows.
+Use the [Experiment 2 workflow](experiment_2_workflow.md) for the active preparation recipe. The commands below document earlier source-conversion utilities used by the [historical experiment](training_ready.md).
 
 This branch introduces non-destructive defaults. **Do not reuse an existing output directory** unless you explicitly intend to replace its contents.
 

@@ -1,6 +1,7 @@
 """RoadLens annotation workspace. Run: python -m streamlit run dashboard/annotate.py"""
 from __future__ import annotations
 import base64
+import argparse
 import csv
 import io
 import sys
@@ -16,12 +17,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 from src import annotations as ann_io
 from src.annotation_editor import editor_boxes, apply_editor_boxes, update_inventory
+from src.experiment_2_recordings import collection_path, load_collection
 
 INVENTORY_PATH = PROJECT_ROOT / 'data/metadata/image_inventory.csv'
 FRAME_ROOT = PROJECT_ROOT / 'data/processed/video_frames'
 canvas_component = components.declare_component('roadlens_annotation_editor', path=str(Path(__file__).parent / 'annotation_canvas'))
 
 st.set_page_config(page_title='RoadLens · Annotation', page_icon=':material/crop_free:', layout='wide')
+parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+parser.add_argument('--collection')
+collection_id = parser.parse_known_args()[0].collection
+annotation_source = None
+if collection_id:
+    try:
+        directory = collection_path(PROJECT_ROOT, collection_id)
+        load_collection(PROJECT_ROOT, directory)
+    except (ValueError, KeyError, OSError) as exc:
+        st.error(f'Cannot open the recording collection. {exc}')
+        st.stop()
+    INVENTORY_PATH = directory/'inventory.csv'
+    annotation_source = 'experiment_2/' + collection_id
 st.markdown('''<style>
 .block-container{max-width:1600px;padding-top:2.5rem;padding-bottom:2rem}
 .annotation-heading{font-size:.75rem;font-weight:600;letter-spacing:.09em;opacity:.65;margin-bottom:.4rem}
@@ -57,7 +72,7 @@ def frame_index():
 
 
 def persist(annotation):
-    path = ann_io.save(annotation)
+    path = ann_io.save(annotation, source=annotation_source)
     updates = {key: str(annotation.get(key, '')).lower() if isinstance(annotation.get(key), bool)
                else annotation.get(key, '') for key in
                ('review_status','shadows_present','patches_present','manholes_present','uncertain','notes')}
@@ -80,6 +95,8 @@ def flush_pending_edit(image_id):
     doc=st.session_state[key]
     updated=apply_editor_boxes(doc,payload['boxes'],doc['image_width'],doc['image_height'])
     updated['ground_truth_verified']=False
+    if collection_id:
+        updated.update(review_status='unreviewed', target_annotation_complete=False)
     persist(updated)
     st.session_state[key]=updated
     st.session_state['annotation_boxes_'+image_id]=payload['boxes']
@@ -107,6 +124,8 @@ if not rows:
 with st.sidebar:
     st.markdown('### RoadLens')
     st.caption('ANNOTATION WORKSPACE')
+    if collection_id:
+        st.caption(f'Recording {collection_id}')
     st.divider()
     source = st.selectbox('Source', ['All sources']+sorted({r.get('source','unknown') for r in rows}))
     status = st.selectbox('Review status', ['All statuses','unreviewed','reviewed','uncertain'])
@@ -137,8 +156,10 @@ row = next(r for r in filtered if r['image_id']==chosen)
 idx = ids.index(chosen)
 key = 'annotation_doc_'+chosen
 if key not in st.session_state:
-    doc = ann_io.load(chosen)
+    doc = ann_io.load(chosen, source=annotation_source)
     doc['source_filepath'] = row['filepath']
+    if collection_id:
+        doc.update(video_id=collection_id, timestamp_ms=int(row['timestamp_ms']))
     st.session_state[key] = doc
     st.session_state['annotation_boxes_'+chosen] = editor_boxes(doc)
     st.session_state['annotation_rev_'+chosen] = 0
@@ -180,6 +201,8 @@ def editor():
             updated=apply_editor_boxes(st.session_state[key],payload['boxes'],width,height)
             # A geometric edit invalidates previously confirmed evaluation IDs/coverage.
             updated['ground_truth_verified']=False
+            if collection_id:
+                updated.update(review_status='unreviewed', target_annotation_complete=False)
             persist(updated)
             st.session_state[key]=updated
             st.session_state[boxeskey]=payload['boxes']
@@ -271,7 +294,7 @@ def plate_redaction():
             st.rerun()
 
 
-if st.toggle('Redact license plates', key='plate_redaction_mode'):
+if not collection_id and st.toggle('Redact license plates', key='plate_redaction_mode'):
     plate_redaction()
 else:
     editor()
@@ -294,13 +317,16 @@ with st.form('review_'+chosen, border=False):
     with st.expander('Evaluation metadata',icon=':material/verified:'):
         st.caption('Optional: use the same physical pothole ID across frames of one defect. Set IDs by selecting boxes in the editor. Verify full-video coverage separately on the Evaluation page.')
         meta=frame_index().get(row['filepath'],{})
-        video_id=st.text_input('Exact source video ID',value=annotation.get('video_id') or meta.get('video_id',''))
+        video_id=st.text_input('Exact source video ID',value=annotation.get('video_id') or meta.get('video_id',''),disabled=bool(collection_id))
         timestamp=str(annotation.get('timestamp_ms',''))
         if not timestamp and meta.get('timestamp_sec'):
             try: timestamp=str(round(float(meta['timestamp_sec'])*1000))
             except ValueError: pass
-        timestamp_input=st.text_input('Source timestamp (milliseconds)',value=timestamp)
+        timestamp_input=st.text_input('Source timestamp (milliseconds)',value=timestamp,disabled=bool(collection_id))
         verified=st.checkbox('I verified this frame’s physical pothole IDs and source alignment',value=annotation.get('ground_truth_verified',False))
+    if collection_id:
+        complete=st.checkbox('I checked the entire road area and marked every visible pothole',
+                             value=annotation.get('target_annotation_complete',False))
     save,advance=st.columns(2)
     saved=save.form_submit_button('Save review',icon=':material/check:',width='stretch')
     next_saved=advance.form_submit_button('Save review & next',type='primary',icon=':material/arrow_forward:',width='stretch')
@@ -310,6 +336,10 @@ with st.form('review_'+chosen, border=False):
                  'shadows_present':shadows,'patches_present':patches,'manholes_present':manholes,'notes':notes,
                  'ground_truth_verified':verified}
         try:
+            if collection_id:
+                if disposition=='reviewed' and not complete:
+                    raise ValueError('Confirm the complete-image review before marking this frame reviewed.')
+                updated['target_annotation_complete']=disposition=='reviewed' and complete
             if timestamp_input.strip():
                 ts=int(timestamp_input)
                 if ts<0: raise ValueError('Timestamp must be nonnegative')
@@ -329,6 +359,6 @@ with st.form('review_'+chosen, border=False):
 if st.session_state.pop('annotation_notice',None):
     st.toast('Review saved.',icon=':material/check_circle:')
 with st.expander('Annotation file',icon=':material/data_object:'):
-    st.caption(str(ann_io.annotation_path(chosen).relative_to(PROJECT_ROOT)))
+    st.caption(str(ann_io.annotation_path(chosen, source=annotation_source)))
     import json
     st.download_button('Download annotation JSON',json.dumps(st.session_state[key],indent=2),chosen+'.json','application/json',icon=':material/download:')

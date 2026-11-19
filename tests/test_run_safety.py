@@ -79,7 +79,9 @@ def test_same_physical_id_preserved_across_frames():
 
 def test_dashboard_navigation_and_clear(tmp_path):
     from streamlit.testing.v1 import AppTest
-    source=Path('dashboard/app.py').read_text()
+    source=Path('dashboard/app.py').read_text(encoding='utf-8')
+    source=source.replace('PROJECT_ROOT = Path(__file__).resolve().parent.parent',
+                          f'PROJECT_ROOT = Path({str(Path.cwd())!r})')
     source=source.replace('DB_PATH = PROJECT_ROOT / "results" / "pothole_verification.db"',
                           f'DB_PATH = Path({str(tmp_path / "ui.db")!r})')
     app=AppTest.from_string(source).run(timeout=30)
@@ -91,14 +93,15 @@ def test_dashboard_navigation_and_clear(tmp_path):
     database.save_events([event('one'),event('two')])
     app.radio(key='nav_page').set_value('Review Events').run()
     assert not app.exception
-    app.button(key='btn_next_one').click().run()
+    app.selectbox(key='rev_filter_status').set_value('All').run()
+    next(b for b in app.button if b.label == 'Next').click().run()
     assert app.session_state['selected_event_id'] == 'two'
-    app.selectbox(key='widget_dec_two').set_value('confirmed').run()
-    app.button(key='btn_save_two').click().run()
+    app.selectbox(key='widget_dec_two').set_value('confirmed')
+    next(b for b in app.button if b.label == 'Save decision').click().run()
     assert database.get_event('two')['review']['decision'] == 'confirmed'
-    app.button(key='btn_clear_two').click().run()
-    assert app.selectbox(key='widget_dec_two').value == 'unreviewed'
-    for page in ('Overview','Evaluation','Export'):
+    app.button(key='undo_two').click().run()
+    assert app.selectbox(key='widget_dec_two').value is None
+    for page in ('Overview','Video Library','Export','Settings'):
         app.radio(key='nav_page').set_value(page).run()
         assert not app.exception
 
@@ -109,7 +112,7 @@ def test_pipeline_failures_keep_previous_run(db, tmp_path, monkeypatch, stage):
     from types import SimpleNamespace
     from unittest.mock import MagicMock
     from src.evaluation.policies import PolicyConfig, apply_policies
-    module = ast.parse(Path('dashboard/app.py').read_text())
+    module = ast.parse(Path('dashboard/app.py').read_text(encoding='utf-8'))
     functions = [n for n in module.body if isinstance(n, ast.FunctionDef)
                  and n.name in ('_execute_video_pipeline', '_run_video_pipeline')]
     detector = MagicMock()

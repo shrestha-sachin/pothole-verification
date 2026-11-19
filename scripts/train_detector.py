@@ -109,6 +109,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.evaluate_only and not Path(args.model).is_file():
         parser.error("--evaluate-only requires --model pointing to an existing checkpoint")
 
+    # The new recipe keeps repository-relative paths in Git. Resolve only a
+    # fresh machine-local copy; historical experiment configs remain untouched.
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from src.portable_dataset import materialize_config
+
     # 1. Device selection
     if args.device:
         device = args.device
@@ -120,6 +126,7 @@ def main(argv: list[str] | None = None) -> None:
     data_yaml_path = args.data.resolve()
     if not data_yaml_path.exists():
         sys.exit(f"ERROR: Dataset YAML config does not exist at {data_yaml_path}")
+    data_yaml_path = materialize_config(data_yaml_path, PROJECT_ROOT)
 
     print(f"[Dataset] Validating YAML configuration: {data_yaml_path}")
     data_dict = check_det_dataset(str(data_yaml_path))
