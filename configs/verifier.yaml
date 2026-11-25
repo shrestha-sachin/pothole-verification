@@ -1,0 +1,15 @@
+# Canonical MobileNetV3-Small visual verifier configuration
+dataset_dir: data/processed/verifier
+architecture: mobilenet_v3_small
+num_classes: 2
+class_names:
+  - non_pothole
+  - pothole
+image_size: 224
+pad_fraction: 0.15
+batch_size: 32
+epochs: 25
+learning_rate: 0.0003
+seed: 42
+output_checkpoint: models/verifier/verifier_v2.pt
+runs_dir: runs/verifier

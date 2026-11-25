@@ -1,0 +1,8 @@
+# Canonical BoT-SORT tracking & temporal event verification configuration
+tracker: botsort.yaml
+min_track_frames: 2
+max_gap_frames: 5
+iou_match_threshold: 0.30
+verifier_aggregation: max_score
+min_event_confidence: 0.35
+min_verifier_score: 0.50

@@ -1,0 +1,99 @@
+# Canonical training, preprocessing, and controlled experiment configurations
+seed: 42
+
+active_experiment: exp_b_roi_90_10
+
+experiments:
+  exp_a_full_90_10:
+    description: "Experiment A: Full-frame images at 960, 90% pos / 8% hard-neg / 2% ord-neg"
+    preprocessing: full_frame
+    tile_wide_roi: false
+    imgsz: 960
+    positive_ratio: 0.90
+    hard_negative_ratio: 0.08
+    ordinary_negative_ratio: 0.02
+  exp_b_roi_90_10:
+    description: "Experiment B: Road ROI at 960, same images/splits/settings as Exp A (90/8/2)"
+    preprocessing: roi
+    tile_wide_roi: false
+    imgsz: 960
+    positive_ratio: 0.90
+    hard_negative_ratio: 0.08
+    ordinary_negative_ratio: 0.02
+  exp_c_tiled_90_10:
+    description: "Experiment C: Road ROI with overlapping horizontal tiles at 960, same images/splits (90/8/2)"
+    preprocessing: roi
+    tile_wide_roi: true
+    imgsz: 960
+    positive_ratio: 0.90
+    hard_negative_ratio: 0.08
+    ordinary_negative_ratio: 0.02
+  exp_d_best_1280:
+    description: "Experiment D: Road ROI at 1280 (update tile_wide_roi based on B vs C outcome)"
+    preprocessing: roi
+    tile_wide_roi: false
+    imgsz: 1280
+    positive_ratio: 0.90
+    hard_negative_ratio: 0.08
+    ordinary_negative_ratio: 0.02
+  exp_e_best_80_20:
+    description: "Experiment E: Road ROI using 80% positive / 16% hard-neg / 4% ordinary-neg composition"
+    preprocessing: roi
+    tile_wide_roi: false
+    imgsz: 960
+    positive_ratio: 0.80
+    hard_negative_ratio: 0.16
+    ordinary_negative_ratio: 0.04
+
+# Source-aware Road ROI coordinates [x1, y1, x2, y2] calibrated from training bounding-box distributions
+source_rois:
+  local_dashcam: [0.04, 0.64, 0.88, 0.992]
+  local_smartphone: [0.04, 0.46, 0.96, 0.992]
+  mapillary: [0.00, 0.50, 1.00, 1.000]
+  rdd2022_usa: [0.00, 0.45, 1.00, 1.000]
+
+dataset:
+  version: curated_v1
+  sources:
+    - rdd2022_usa
+    - local_smartphone
+    - local_dashcam
+    - mapillary
+  val_target_potholes_min: 50
+  verifier_pad_fraction: 0.15
+  verifier_target_pos_ratio: 0.40
+  verifier_target_neg_ratio: 0.60
+
+detector:
+  # Proposal-aligned baseline: YOLO11n with explicit AdamW hyperparameters
+  base_model: models/detector/yolo11n.pt
+  data_config: configs/detector.yaml
+  epochs: 100
+  patience: 25
+  batch: 16
+  imgsz: 960
+  optimizer: AdamW
+  lr0: 0.001
+  amp: true
+  seed: 42
+  workers: 2
+  device: "0"
+  runs_dir: runs/detector
+  output_checkpoint: models/detector/yolo11n_exp_b.pt
+  # Conservative small-object runtime augmentation (training split only)
+  augmentation:
+    mosaic: 0.3
+    close_mosaic: 15
+    mixup: 0.0
+    cutmix: 0.0
+    copy_paste: 0.0
+    degrees: 3.0
+    translate: 0.05
+    scale: 0.2
+    shear: 0.0
+    perspective: 0.0
+    fliplr: 0.5
+    flipud: 0.0
+    hsv_h: 0.01
+    hsv_s: 0.3
+    hsv_v: 0.25

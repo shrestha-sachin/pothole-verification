@@ -1,6 +1,0 @@
-path: C:/SACHIN/Projects/pothole-verification
-names:
-  0: pothole
-train: C:/SACHIN/Projects/pothole-verification/data/training/pothole_v1/train.txt
-test: C:/SACHIN/Projects/pothole-verification/data/training/pothole_v1/test.txt
-val: C:/SACHIN/Projects/pothole-verification/data/training/pothole_v1/val.txt

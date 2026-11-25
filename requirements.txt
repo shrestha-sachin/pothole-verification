@@ -1,12 +1,11 @@
-# Core ML / detection (installed in .venv)
-# torch and torchvision are installed via PyTorch index -- see README.
+# Core ML / object detection (install PyTorch + torchvision for your platform first)
 ultralytics>=8.0
 
-# Image processing
+# Image & video processing
 Pillow>=10.0
 opencv-python>=4.8
 
-# Data / numerics
+# Data & numerics
 numpy>=1.24
 pandas>=2.0
 
@@ -14,17 +13,14 @@ pandas>=2.0
 requests>=2.31
 urllib3>=2.0
 
-# Annotation dashboard
+# Dashboards
 streamlit>=1.45
 
-# Utilities
+# Configuration
 pyyaml>=6.0
-kagglehub>=1.0.3
 
-# Tracking support (Hungarian algorithm for BoT-SORT)
-# Install with: pip install lapx
+# Tracking support (Hungarian assignment for BoT-SORT)
 lapx
 
-# Verifier (MobileNetV3-Small) — torchvision must match your torch version
-# Install with: pip install torchvision
+# Visual verifier (MobileNetV3-Small) — install matching your PyTorch build:
 # torchvision>=0.15

@@ -102,6 +102,8 @@ try:
     from src.video.annotated_renderer import (
         AnnotatedVideoRenderer,
     )
+    from src.preprocessing.roi import DEFAULT_SOURCE_ROIS, SourceROI
+    from src.utils.config import load_checkpoint_metadata
 except ImportError as e:
     st.error(f"Project import failure: {e}")
     st.stop()
@@ -109,11 +111,11 @@ except ImportError as e:
 # ---------------------------------------------------------------------------
 # Paths & Setup
 # ---------------------------------------------------------------------------
-EVIDENCE_ROOT = PROJECT_ROOT / "results" / "evidence"
+EVIDENCE_ROOT = PROJECT_ROOT / "results" / "evaluations"
 DB_PATH = PROJECT_ROOT / "results" / "pothole_verification.db"
-LOCAL_VIDEO_DIR = PROJECT_ROOT / "data" / "raw" / "local_video"
+LOCAL_VIDEO_DIR = PROJECT_ROOT / "data" / "raw" / "local"
 MODELS_DIR = PROJECT_ROOT / "models"
-ANNOTATED_VIDEOS_DIR = PROJECT_ROOT / "results" / "annotated_videos"
+ANNOTATED_VIDEOS_DIR = PROJECT_ROOT / "results" / "predictions"
 SETTINGS_PATH = PROJECT_ROOT / "configs" / "dashboard_settings.json"
 
 EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -274,6 +276,38 @@ def configured_detector(settings):
     return path, None
 
 
+def _resolve_checkpoint_preprocessing(
+    model_path: Path,
+    video_path: Optional[Path] = None,
+) -> tuple[dict[str, Any], Optional[SourceROI], bool, str]:
+    """Load checkpoint preprocessing metadata and resolve Road ROI & tiling without double-cropping."""
+    meta = load_checkpoint_metadata(model_path)
+    profile = str(meta.get("preprocessing_profile", "full_frame"))
+    tile_wide = bool(meta.get("tile_wide_roi", False) or profile == "roi_tiled")
+    if profile not in {"roi", "roi_tiled"} and not tile_wide:
+        return meta, None, False, "Using full-frame preprocessing (no Road ROI crop)."
+
+    if video_path is not None:
+        vposix = video_path.as_posix().lower()
+        if "_roi" in video_path.stem.lower() or "/processed/" in vposix:
+            return meta, None, False, "Pre-cropped input detected; skipping Road ROI crop to avoid double-cropping."
+
+    src_key = "local_smartphone" if (video_path and "smartphone" in video_path.as_posix().lower()) else "local_dashcam"
+    coords = (meta.get("source_rois") or {}).get(src_key)
+    if isinstance(coords, (list, tuple)) and len(coords) == 4:
+        roi = SourceROI(*[float(v) for v in coords])
+    else:
+        roi = DEFAULT_SOURCE_ROIS[src_key]
+    if tile_wide:
+        note = (
+            f"Auto-applying `{src_key}` Road ROI {roi.to_tuple()} with 15% overlap horizontal tiling "
+            f"and original-frame NMS merge before tracking."
+        )
+    else:
+        note = f"Auto-applying `{src_key}` Road ROI {roi.to_tuple()} to raw frames."
+    return meta, roi, tile_wide, note
+
+
 def page_overview():
     st.subheader("Overview", anchor=False)
     st.caption("Turn road footage into findings your team can review and report.")
@@ -339,16 +373,17 @@ def page_process():
             upload_key = (uploaded.file_id, uploaded.name, uploaded.size)
             saved = st.session_state.get("saved_upload")
             if not saved or saved[0] != upload_key or not Path(saved[1]).is_file():
-                LOCAL_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+                upload_dir = LOCAL_VIDEO_DIR / "dashcam" / "videos"
+                upload_dir.mkdir(parents=True, exist_ok=True)
                 content = uploaded.getvalue()
                 name = Path(uploaded.name)
-                destination = LOCAL_VIDEO_DIR / f"{name.stem}_{hashlib.sha256(content).hexdigest()[:12]}{name.suffix.lower()}"
+                destination = upload_dir / f"{name.stem}_{hashlib.sha256(content).hexdigest()[:12]}{name.suffix.lower()}"
                 if not destination.exists():
                     destination.write_bytes(content)
                 st.session_state["saved_upload"] = (upload_key, str(destination))
             video_path_final = Path(st.session_state["saved_upload"][1])
     else:
-        local = sorted(p for p in LOCAL_VIDEO_DIR.iterdir() if p.is_file() and p.suffix.lower() in {".mp4", ".mov", ".avi"}) if LOCAL_VIDEO_DIR.exists() else []
+        local = sorted(p for p in LOCAL_VIDEO_DIR.rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mov", ".avi"}) if LOCAL_VIDEO_DIR.exists() else []
         if local:
             chosen = st.selectbox("Saved video", [str(p) for p in local], format_func=lambda p: Path(p).name)
             video_path_final = Path(chosen)
@@ -397,12 +432,23 @@ def page_process():
         st.warning(f"This video already has {len(existing)} findings. Analyzing it again replaces the current findings. Existing reviews are matched to the new findings where possible; earlier results are archived.")
         replace_ok = st.checkbox("Analyze again and replace the current findings", key=f"replace_{video_id}")
     model_path, setup_error = configured_detector(settings)
+    ckpt_meta: dict[str, Any] = {}
+    video_roi: Optional[SourceROI] = None
+    video_tile_wide: bool = False
     if setup_error:
         st.info(setup_error)
         if st.button("Open Settings", icon=":material/settings:"):
             go_to("Settings")
     else:
-        st.caption("Using saved analysis settings. You can change them in Settings.")
+        ckpt_meta, video_roi, video_tile_wide, roi_note = _resolve_checkpoint_preprocessing(model_path, video_path_final)
+        profile = ckpt_meta.get("preprocessing_profile", "full_frame")
+        expected_sz = ckpt_meta.get("input_imgsz", settings["imgsz"])
+        st.caption(f"Model preprocessing: `{profile}` | tile_wide_roi=`{video_tile_wide}` | Trained imgsz: `{expected_sz}` | {roi_note}")
+        if ckpt_meta.get("input_imgsz") and settings["imgsz"] != ckpt_meta["input_imgsz"]:
+            st.warning(
+                f"Settings image size ({settings['imgsz']}px) differs from checkpoint training size "
+                f"({ckpt_meta['input_imgsz']}px)."
+            )
     can_analyze = video_ready and model_path is not None and replace_ok and (bool(road.strip()) or not review_output)
     if review_output and video_ready and not road.strip():
         st.caption("Enter a road or area name to include it in your report.")
@@ -417,11 +463,14 @@ def page_process():
                 conf_threshold=settings["detector_conf"], iou_threshold=settings["detector_iou"], imgsz=settings["imgsz"],
                 road_segment_id=road.strip(), policy_b_min_obs=settings["min_obs"], policy_b_window=settings["temporal_window"],
                 verifier_threshold=settings["verifier_threshold"], preserve_reviews=True, generate_clips=settings["generate_clips"],
+                roi=video_roi, checkpoint_meta=ckpt_meta, tile_wide_roi=video_tile_wide,
             )
         else:
             _execute_annotated_video_pipeline(db=db, video_path=video_path_final, video_id=video_id,
                 model_path=model_path, conf_threshold=settings["detector_conf"], imgsz=settings["imgsz"],
-                use_tracking=settings["tracking"], iou_threshold=settings["detector_iou"])
+                use_tracking=settings["tracking"], iou_threshold=settings["detector_iou"],
+                roi=video_roi, preprocessing_profile=str(ckpt_meta.get("preprocessing_profile", "full_frame")),
+                tile_wide_roi=video_tile_wide)
 
 
 def _render_annotated_video_view(meta_dict: dict[str, Any]):
@@ -476,6 +525,9 @@ def _execute_annotated_video_pipeline(
     imgsz: int,
     use_tracking: bool,
     iou_threshold: float = 0.45,
+    roi: "Optional[SourceROI]" = None,
+    preprocessing_profile: str = "full_frame",
+    tile_wide_roi: bool = False,
 ):
     from src.video.annotated_renderer import AnnotatedVideoRenderer, RenderProgress
 
@@ -503,6 +555,9 @@ def _execute_annotated_video_pipeline(
                 device=device,
                 use_tracking=use_tracking,
                 progress_callback=on_prog,
+                roi=roi,
+                preprocessing_profile=preprocessing_profile,
+                tile_wide_roi=tile_wide_roi,
             )
         except Exception as exc:
             prog_bar.empty()
@@ -571,6 +626,9 @@ def _run_video_pipeline(
     verifier_threshold: float,
     preserve_reviews: bool,
     generate_clips: bool,
+    roi: "Optional[SourceROI]" = None,
+    checkpoint_meta: "Optional[dict[str, Any]]" = None,
+    tile_wide_roi: bool = False,
 ):
     from ultralytics import YOLO
 
@@ -586,6 +644,9 @@ def _run_video_pipeline(
         "min_obs": policy_b_min_obs, "temporal_window_frames": policy_b_window,
         "verifier_path": verifier_path, "verifier_threshold": verifier_threshold,
         "preprocessing_version": "context15-letterbox224-imagenet-v1",
+        "preprocessing_profile": (checkpoint_meta or {}).get("preprocessing_profile", "full_frame"),
+        "tile_wide_roi": tile_wide_roi,
+        "applied_roi": list(roi.to_tuple()) if roi is not None else None,
     }
     def checkpoint_hash(path):
         if not path:
@@ -649,6 +710,8 @@ def _run_video_pipeline(
             generate_clips=generate_clips,
             total_expected_frames=expected,
             progress_callback=on_prog,
+            roi=roi,
+            tile_wide_roi=tile_wide_roi,
         )
         prog_bar.empty()
         prog_text.empty()
@@ -1091,6 +1154,17 @@ def page_settings():
         with st.expander("Technical setup and analysis settings"):
             st.caption("Changes apply to future analyses. Existing videos and findings keep their original results.")
             detector = st.text_input("Pothole model file", value=settings["detector_path"], help="Path to a trained .pt detector whose first class is pothole. Relative paths start at the project folder.")
+            det_resolved = Path(detector.strip())
+            if not det_resolved.is_absolute():
+                det_resolved = PROJECT_ROOT / det_resolved
+            if det_resolved.is_file():
+                d_meta = load_checkpoint_metadata(det_resolved)
+                st.caption(
+                    f"Loaded model metadata: profile=`{d_meta.get('preprocessing_profile', 'full_frame')}`, "
+                    f"tile_wide_roi=`{d_meta.get('tile_wide_roi', False)}`, "
+                    f"imgsz=`{d_meta.get('input_imgsz', 'unknown')}`, "
+                    f"experiment=`{d_meta.get('experiment_profile', 'legacy')}`"
+                )
             verifier = st.text_input("Additional image-check model (optional)", value=settings["verifier_path"], help="Leave blank if no trained verifier is available.")
             c1, c2 = st.columns(2)
             with c1:

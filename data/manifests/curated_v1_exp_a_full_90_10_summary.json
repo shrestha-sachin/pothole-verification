@@ -1,0 +1,244 @@
+{
+  "dataset_version": "curated_v1",
+  "experiment_profile": "exp_a_full_90_10",
+  "preprocessing_mode": "full_frame",
+  "tile_wide_roi": false,
+  "seed": 42,
+  "frozen_manifests": {
+    "version": "curated_v1",
+    "status": "created_or_updated",
+    "manifest_csv": "data/manifests/curated_v1_exp_a_full_90_10_manifest.csv",
+    "manifest_sha256": "af7479a3dfbc2007c6035b7db5bec9bab141594dbe4f9cb7a6c98574cd6faff7",
+    "summary_json": "data/manifests/curated_v1_exp_a_full_90_10_summary.json"
+  },
+  "raw_audit_by_source": {
+    "rdd2022_usa": {
+      "total": 4805,
+      "reviewed": 4805,
+      "unreviewed": 0,
+      "uncertain": 0,
+      "positives": 116,
+      "reviewed_negatives": 4689,
+      "total_boxes": 135,
+      "corrupt": 0,
+      "missing_label": 0,
+      "invalid_boxes": 0,
+      "neg_subcategories": {
+        "crack": 4689
+      }
+    },
+    "local_smartphone": {
+      "total": 154,
+      "reviewed": 154,
+      "unreviewed": 0,
+      "uncertain": 0,
+      "positives": 38,
+      "reviewed_negatives": 116,
+      "total_boxes": 90,
+      "corrupt": 0,
+      "missing_label": 0,
+      "invalid_boxes": 0,
+      "neg_subcategories": {
+        "ordinary_background": 109,
+        "repaired_patch": 6,
+        "manhole_cover": 1
+      }
+    },
+    "local_dashcam": {
+      "total": 840,
+      "reviewed": 103,
+      "unreviewed": 736,
+      "uncertain": 1,
+      "positives": 58,
+      "reviewed_negatives": 45,
+      "total_boxes": 128,
+      "corrupt": 0,
+      "missing_label": 0,
+      "invalid_boxes": 0,
+      "neg_subcategories": {
+        "ordinary_background": 15,
+        "other": 30
+      }
+    },
+    "mapillary": {
+      "total": 206,
+      "reviewed": 206,
+      "unreviewed": 0,
+      "uncertain": 0,
+      "positives": 17,
+      "reviewed_negatives": 189,
+      "total_boxes": 27,
+      "corrupt": 0,
+      "missing_label": 0,
+      "invalid_boxes": 0,
+      "neg_subcategories": {
+        "ordinary_background": 184,
+        "repaired_patch": 5
+      }
+    }
+  },
+  "object_vs_physical_counts": {
+    "rdd2022_usa": {
+      "images": 4805,
+      "positive_images": 116,
+      "bounding_box_instances": 135,
+      "verified_unique_physical_potholes": 0,
+      "estimated_temporal_encounters_unverified": null,
+      "note": "Static imagery without multi-frame physical pothole tracking IDs."
+    },
+    "local_smartphone": {
+      "images": 154,
+      "positive_images": 38,
+      "bounding_box_instances": 90,
+      "verified_unique_physical_potholes": 0,
+      "estimated_temporal_encounters_unverified": 16,
+      "note": "Estimated temporal encounters (<=4s video gap) are NOT verified unique physical pothole IDs."
+    },
+    "local_dashcam": {
+      "images": 840,
+      "positive_images": 58,
+      "bounding_box_instances": 128,
+      "verified_unique_physical_potholes": 0,
+      "estimated_temporal_encounters_unverified": 36,
+      "note": "Estimated temporal encounters (<=4s video gap) are NOT verified unique physical pothole IDs."
+    },
+    "mapillary": {
+      "images": 206,
+      "positive_images": 17,
+      "bounding_box_instances": 27,
+      "verified_unique_physical_potholes": 0,
+      "estimated_temporal_encounters_unverified": null,
+      "note": "Static imagery without multi-frame physical pothole tracking IDs."
+    }
+  },
+  "splits": {
+    "train": {
+      "images": 201,
+      "positive_images": 181,
+      "negative_images": 20,
+      "pothole_boxes": 292
+    },
+    "val": {
+      "images": 107,
+      "positive_images": 36,
+      "negative_images": 71,
+      "pothole_boxes": 76
+    },
+    "test": {
+      "images": 15,
+      "positive_images": 12,
+      "negative_images": 3,
+      "pothole_boxes": 12
+    }
+  },
+  "by_source_and_split": {
+    "local_dashcam": {
+      "train": {
+        "positive": 36,
+        "negative": 7
+      },
+      "val": {
+        "positive": 22,
+        "negative": 31
+      },
+      "test": {
+        "positive": 0,
+        "negative": 0
+      }
+    },
+    "local_smartphone": {
+      "train": {
+        "positive": 38,
+        "negative": 5
+      },
+      "val": {
+        "positive": 0,
+        "negative": 0
+      },
+      "test": {
+        "positive": 0,
+        "negative": 0
+      }
+    },
+    "mapillary": {
+      "train": {
+        "positive": 15,
+        "negative": 4
+      },
+      "val": {
+        "positive": 2,
+        "negative": 37
+      },
+      "test": {
+        "positive": 0,
+        "negative": 0
+      }
+    },
+    "rdd2022_usa": {
+      "train": {
+        "positive": 92,
+        "negative": 4
+      },
+      "val": {
+        "positive": 12,
+        "negative": 3
+      },
+      "test": {
+        "positive": 12,
+        "negative": 3
+      }
+    }
+  },
+  "train_composition": {
+    "target": {
+      "positive": 0.9,
+      "hard_negative": 0.08,
+      "ordinary_negative": 0.02
+    },
+    "achieved": {
+      "positive": 0.9005,
+      "hard_negative": 0.0796,
+      "ordinary_negative": 0.0199
+    },
+    "unused_reviewed_negatives_preserved": 873
+  },
+  "unique_groups": 131,
+  "unique_videos": 10,
+  "deduplication": {
+    "exact_duplicates": 0,
+    "cross_split_near_duplicates": 0,
+    "adjacent_video_negative_duplicates": 1
+  },
+  "roi_stats": {
+    "original_boxes": 380,
+    "retained_boxes": 380,
+    "truncated_boxes": 0,
+    "dropped_boxes_train": 0,
+    "dropped_boxes_eval_misses": 0
+  },
+  "effective_resolution_at_imgsz": {
+    "640": {
+      "median_w_px": 22.0,
+      "median_h_px": 12.5,
+      "p10_w_px": 9.8,
+      "p10_h_px": 5.0,
+      "pct_boxes_min_side_lt_16px": 64.2
+    },
+    "960": {
+      "median_w_px": 33.0,
+      "median_h_px": 18.8,
+      "p10_w_px": 14.7,
+      "p10_h_px": 7.5,
+      "pct_boxes_min_side_lt_16px": 43.4
+    },
+    "1280": {
+      "median_w_px": 44.0,
+      "median_h_px": 25.0,
+      "p10_w_px": 19.6,
+      "p10_h_px": 10.0,
+      "pct_boxes_min_side_lt_16px": 32.1
+    }
+  },
+  "verifier_dataset": {},
+  "validation_passed": true
+}

@@ -1,0 +1,24 @@
+{
+  "checkpoint": "models/detector/yolo11n_baseline.pt",
+  "architecture": "yolo11n",
+  "base_model": "yolo11n.pt",
+  "experiment_name": "pothole_combined",
+  "experiment_profile": "legacy_combined_full_frame",
+  "dataset_version": "legacy_combined",
+  "data_config": "configs/detector.yaml",
+  "preprocessing_profile": "full_frame",
+  "tile_wide_roi": false,
+  "source_rois": {},
+  "input_imgsz": 960,
+  "hyperparameters": {
+    "epochs": 100,
+    "batch": 16,
+    "imgsz": 960,
+    "optimizer": "auto",
+    "lr0_logged": 0.01,
+    "amp": true,
+    "seed": 0,
+    "scale": 0.5
+  },
+  "notes": "Pre-curation baseline recorded from runs/detector/pothole_combined/args.yaml."
+}

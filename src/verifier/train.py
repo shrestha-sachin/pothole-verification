@@ -169,10 +169,11 @@ def load_dataset_splits(
         raise FileNotFoundError(f"Crop inventory file not found: {inventory_path}")
 
     # Safety check: do not train verifier on raw full-frame image inventory
-    if "crop_inventory" not in inventory_path.name.lower():
+    inv_name = inventory_path.name.lower()
+    if "crop_inventory" not in inv_name and "verifier_manifest" not in inv_name:
         raise ValueError(
             f"Refusing to train verifier on full-frame image inventory '{inventory_path.name}'. "
-            "A valid crop inventory CSV (e.g. data/metadata/crop_inventory.csv) is required."
+            "A valid crop inventory CSV (e.g. verifier_manifest.csv or crop_inventory.csv) is required."
         )
 
     train_samples: list[dict] = []
@@ -338,7 +339,7 @@ def evaluate_verifier(
 def train_verifier(
     train_samples: list[dict],
     val_samples: list[dict],
-    output_checkpoint: str | Path = "models/verifier_v1.pt",
+    output_checkpoint: str | Path = "models/verifier/verifier_v2.pt",
     epochs_frozen: int = 5,
     epochs_finetune: int = 5,
     batch_size: int = 32,

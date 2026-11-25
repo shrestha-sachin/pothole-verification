@@ -1,21 +1,8 @@
-# YOLO Dataset Configuration for Pothole Verification
-# Combined Local Green Bay + RDD2022 US (Balanced Background Negatives)
-path: .
-
-# Training sets
-train:
-  - exports/yolo_labels/train.txt
-  - data/processed/rdd2022/train.txt
-
-# Validation sets
-val:
-  - exports/yolo_labels/val.txt
-  - data/processed/rdd2022/val.txt
-
-# Held-out test sets (protected from training and hyperparameter tuning)
-test:
-  - exports/yolo_labels/test.txt
-  - data/processed/rdd2022/test.txt
+# Canonical YOLO detector dataset configuration (repository-relative, portable across Windows/macOS/Modal)
+path: data/processed/detector
+train: images/train
+val: images/val
+test: images/test
 
 names:
   0: pothole

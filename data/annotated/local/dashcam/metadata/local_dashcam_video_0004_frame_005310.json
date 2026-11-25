@@ -1,0 +1,54 @@
+{
+  "image_id": "e2_dashcam_20261112_03_0005310",
+  "source_filepath": "data/processed/experiment_2_recordings/dashcam_20261112_03/dashcam_20261112_03_t000000177000.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [
+    {
+      "x": 437,
+      "y": 1902,
+      "w": 74,
+      "h": 38,
+      "_editor_id": "draft_e2_dashcam_20261112_03_0005310_0"
+    }
+  ],
+  "negative_regions": [
+    {
+      "x": 759,
+      "y": 1734,
+      "w": 147,
+      "h": 45,
+      "_editor_id": "32b3b6da-1a44-4090-a056-1e41fd47576f",
+      "subtype": "manhole"
+    },
+    {
+      "x": 1345,
+      "y": 1753,
+      "w": 134,
+      "h": 50,
+      "_editor_id": "9f0b7c97-1102-43c4-8bc7-576a0f637c05",
+      "subtype": "manhole"
+    },
+    {
+      "x": 1762,
+      "y": 1861,
+      "w": 149,
+      "h": 37,
+      "_editor_id": "2309a3a8-7359-4778-b07a-3622a868bfc5",
+      "subtype": "manhole"
+    }
+  ],
+  "annotation_version": 1,
+  "video_id": "dashcam_20261112_03",
+  "timestamp_ms": 177000,
+  "ground_truth_verified": false,
+  "target_annotation_complete": true,
+  "standardized_id": "local_dashcam_video_0004_frame_005310",
+  "parent_video": "local_dashcam_video_0004"
+}

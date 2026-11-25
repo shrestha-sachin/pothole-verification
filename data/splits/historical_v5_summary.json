@@ -1,0 +1,65 @@
+{
+  "seed": 42,
+  "splits": {
+    "train": {
+      "images": 734,
+      "positive_images": 204,
+      "negative_images": 530,
+      "pothole_boxes": 354,
+      "by_source": {
+        "dashcam_new": {
+          "positive": 59,
+          "negative": 39
+        },
+        "local_mapillary": {
+          "positive": 15,
+          "negative": 152
+        },
+        "local_video": {
+          "positive": 38,
+          "negative": 116
+        },
+        "rdd_United_States": {
+          "positive": 92,
+          "negative": 23
+        },
+        "rdd_United_States_extra_neg": {
+          "positive": 0,
+          "negative": 200
+        }
+      }
+    },
+    "val": {
+      "images": 60,
+      "positive_images": 14,
+      "negative_images": 46,
+      "pothole_boxes": 15,
+      "by_source": {
+        "dashcam_new": {
+          "positive": 0,
+          "negative": 6
+        },
+        "local_mapillary": {
+          "positive": 2,
+          "negative": 37
+        },
+        "rdd_United_States": {
+          "positive": 12,
+          "negative": 3
+        }
+      }
+    },
+    "test": {
+      "images": 15,
+      "positive_images": 12,
+      "negative_images": 3,
+      "pothole_boxes": 12,
+      "by_source": {
+        "rdd_United_States": {
+          "positive": 12,
+          "negative": 3
+        }
+      }
+    }
+  }
+}

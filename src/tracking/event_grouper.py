@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 
 from src.evaluation.policies import check_temporal_window
+from src.preprocessing.roi import SourceROI
 from src.verifier.preprocessing import (
     DEFAULT_PAD_FRAC,
     compute_laplacian_variance,
@@ -213,14 +214,16 @@ class EventGrouper:
         generate_clips: bool = False,
         total_expected_frames: Optional[int] = None,
         progress_callback = None,
+        roi: Optional[SourceROI] = None,
+        tile_wide_roi: bool = False,
+        merge_iou: float = 0.50,
     ) -> list[CandidateEvent]:
         """
         Process frames incrementally with bounded memory:
           1. Stream frames without retaining 4K bitmaps in RAM.
           2. Reset tracker state between videos.
-          3. Pass BGR directly to model.track (Ultralytics handles flip).
-          4. Maintain bounded evidence buffers on disk staging per active track,
-             evicting files when popped and flushing when tracks go inactive.
+          3. Apply matching ROI / horizontal-tile preprocessing and NMS-merge in original coordinates before tracking.
+          4. Maintain bounded evidence buffers on disk staging per active track.
           5. Handle tracker reactivation explicitly if historical track ID re-appears.
           6. Write final evidence and assemble CandidateEvents.
         """
@@ -230,6 +233,14 @@ class EventGrouper:
 
         # Clean tracker reset
         model.predictor = None
+
+        tiled_tracker = None
+        if tile_wide_roi:
+            from src.detector.inference import create_botsort_tracker
+            import yaml as _yaml
+
+            tracker_dict = _yaml.safe_load(Path(cfg_path).read_text(encoding="utf-8")) or {}
+            tiled_tracker = create_botsort_tracker(tracker_dict, device="cpu" if device in ("auto", "mps") else device)
 
         ev_root = Path(evidence_root) if evidence_root else None
         tmp_dir: Optional[Path] = None
@@ -346,31 +357,68 @@ class EventGrouper:
 
         try:
             for frame_idx, (fi, ts_ms, bgr) in enumerate(frame_iter):
-                # Pass BGR directly to model.track (BasePredictor preprocess flips BGR to RGB)
-                results = model.track(
-                    bgr,
-                    conf=conf,
-                    iou=iou,
-                    imgsz=imgsz,
-                    device=device,
-                    tracker=cfg_path,
-                    persist=True,
-                    verbose=False,
-                )
+                frame_dets: list[tuple[int, int, int, int, float, int]] = []
+                if tiled_tracker is not None:
+                    from src.detector.inference import predict_frame_detections, track_merged_detections
 
-                for r in results:
-                    if r.boxes is None or r.boxes.id is None:
-                        continue
-                    for box in r.boxes:
-                        cls_id = int(box.cls[0].item())
-                        if cls_id != self.target_class_id:
+                    merged_preds = predict_frame_detections(
+                        model,
+                        bgr,
+                        conf=conf,
+                        iou=iou,
+                        imgsz=imgsz,
+                        device=device,
+                        roi=roi,
+                        tile_wide_roi=True,
+                        merge_iou=merge_iou,
+                        target_class_id=self.target_class_id,
+                    )
+                    for td in track_merged_detections(tiled_tracker, merged_preds, bgr):
+                        frame_dets.append(
+                            (
+                                int(round(td["x1"])),
+                                int(round(td["y1"])),
+                                int(round(td["x2"])),
+                                int(round(td["y2"])),
+                                float(td["conf"]),
+                                int(td["track_id"]),
+                            )
+                        )
+                else:
+                    if roi is not None:
+                        h_f, w_f = bgr.shape[:2]
+                        ox, oy, rx2, ry2 = roi.to_pixels(w_f, h_f)
+                        infer_bgr = bgr[oy:ry2, ox:rx2]
+                    else:
+                        ox, oy = 0, 0
+                        infer_bgr = bgr
+
+                    # Pass BGR directly to model.track (BasePredictor preprocess flips BGR to RGB)
+                    results = model.track(
+                        infer_bgr,
+                        conf=conf,
+                        iou=iou,
+                        imgsz=imgsz,
+                        device=device,
+                        tracker=cfg_path,
+                        persist=True,
+                        verbose=False,
+                    )
+                    for r in results:
+                        if r.boxes is None or r.boxes.id is None:
                             continue
-                        box_conf = float(box.conf[0].item())
-                        track_id = int(box.id[0].item())
-                        x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                        for box in r.boxes:
+                            cls_id = int(box.cls[0].item())
+                            if cls_id != self.target_class_id:
+                                continue
+                            bx1, by1, bx2, by2 = [int(v) for v in box.xyxy[0].tolist()]
+                            if ox or oy:
+                                bx1, by1, bx2, by2 = bx1 + ox, by1 + oy, bx2 + ox, by2 + oy
+                            frame_dets.append((bx1, by1, bx2, by2, float(box.conf[0].item()), int(box.id[0].item())))
 
-                        # Only record as actual observation if conf >= threshold
-                        if box_conf >= conf:
+                for x1, y1, x2, y2, box_conf, track_id in frame_dets:
+                    if box_conf >= conf:
+                        if True:
                             crop_bgr = extract_padded_crop(bgr, (x1, y1, x2, y2), pad_frac=DEFAULT_PAD_FRAC)
                             lap_var = compute_laplacian_variance(crop_bgr)
 

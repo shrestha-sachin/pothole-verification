@@ -1,0 +1,10 @@
+# Canonical inference configuration
+detector_checkpoint: models/detector/yolo26x_us_v5_960.pt
+verifier_checkpoint: models/verifier/verifier_v1.pt
+imgsz: 960
+confidence_threshold: 0.25
+iou_threshold: 0.50
+verifier_threshold: 0.50
+sample_fps: 2.0
+device: auto
+output_dir: results/predictions

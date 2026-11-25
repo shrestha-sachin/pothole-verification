@@ -1,160 +1,87 @@
 # =============================================================================
-# pothole-verification  —  .gitignore
+# pothole-verification — .gitignore
 # =============================================================================
 
-# ---------------------------------------------------------------------------
-# Raw image and video data (large binary files — do not commit)
-# ---------------------------------------------------------------------------
-# Comprehensive raw image protection across all subdirectories
-data/raw/**/*.jpg
-data/raw/**/*.jpeg
-data/raw/**/*.png
-data/raw/**/*.webp
-data/raw/**/*.mp4
-data/raw/**/*.mov
-data/raw/**/*.avi
-data/raw/**/*.mkv
-data/raw/**/*.m4v
-data/raw/mapillary/*/images/
-
-# Video files (all video containers)
-data/raw/local_video/*
-!data/raw/local_video/.gitkeep
-data/raw/green_bay_images/
-data/raw/rdd2022/
-data/raw/RDD2022/
-data/raw/kaggle_cache/
-data/raw/RoboFlow Dataset/
-data/raw/roboflow_candidates/
-
-# Partial and temporary download artifacts
-*.part
-*.tmp
-*.temp
-*.bak
-*.log
-/tmp/
-/temp/
-
-# ---------------------------------------------------------------------------
-# Backups (internal safety copies — do not commit)
-# ---------------------------------------------------------------------------
-data/backups/
-
-# ---------------------------------------------------------------------------
-# Processed data (generated — do not commit)
-# ---------------------------------------------------------------------------
-/data/processed/
-# Staged datasets include generated reports. Keep data/training/README.md visible.
-/data/training/*/
-# Generated Experiment 2 rebuild and comparison configs. Keep the canonical config visible.
-/configs/detector_experiment_2_*.yaml
-data/processes/
+# Raw & processed datasets (large binaries — never commit)
+data/raw/
+!data/raw/.gitkeep
+data/processed/
+!data/processed/.gitkeep
+data/annotated/*/images/
+data/annotated/local/*/images/
 *.cache
 *.cache.npy
-data/metadata/*
-!data/metadata/image_inventory.csv
-!data/metadata/rdd_subsampled_negatives.csv
-!data/metadata/rdd_dataset_manifest.csv
-!data/metadata/.gitkeep
 
-# ---------------------------------------------------------------------------
-# Annotations (human labels — tracked in git)
-# ---------------------------------------------------------------------------
-# data/annotations/ is tracked so labels sync between Mac and Lab computers
+# Regeneratable model draft proposals & temporary staging
+data/manifests/assisted_proposals.json
+**/.tmp_candidates/
 
-
-# ---------------------------------------------------------------------------
-# Generated exports (YOLO labels for training)
-# ---------------------------------------------------------------------------
-exports/*
-!exports/.gitkeep
-
-# ---------------------------------------------------------------------------
-# Model weights and training artefacts
-# ---------------------------------------------------------------------------
+# Model weights and training runs (keep .meta.json provenance sidecars tracked)
 *.pt
 *.pth
 *.onnx
 *.engine
 *.tflite
 runs/
-weights/
-models/*
+!runs/.gitkeep
+!runs/detector/.gitkeep
+!runs/verifier/.gitkeep
+models/*/*
 !models/.gitkeep
+!models/detector/.gitkeep
+!models/verifier/.gitkeep
+!models/**/*.meta.json
+weights/
 checkpoints/
 
-# ---------------------------------------------------------------------------
-# Virtual environments
-# ---------------------------------------------------------------------------
+# Runtime results & local databases (keep concise Markdown/JSON reports committable)
+results/predictions/
+results/evaluations/
+results/reports/*
+!results/reports/.gitkeep
+!results/reports/*.md
+!results/reports/*.json
+results/*.db
+results/*.db-*
+configs/dashboard_settings.json
+
+# Python & virtual environments
 .venv/
 venv/
 env/
-.env/
-
-# ---------------------------------------------------------------------------
-# Python caches
-# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
-.coverage.*
 htmlcov/
-coverage.xml
-.Python
 *.egg-info/
 dist/
 build/
-.eggs/
 
-# ---------------------------------------------------------------------------
-# Secrets and credentials
-# ---------------------------------------------------------------------------
+# Secrets & environment variables
 .env
 .env.local
 .env.*.local
+!.env.example
 secrets.yaml
 secrets.yml
 *.key
 *.pem
-!.env.example
+.streamlit/secrets.toml
 
-# ---------------------------------------------------------------------------
-# OS / editor noise
-# ---------------------------------------------------------------------------
+# Temporary / OS / IDE noise
+*.part
+*.tmp
+*.temp
+*.bak
+*.log
+*.dll
 .DS_Store
 Thumbs.db
 desktop.ini
-*.dll
 .idea/
 .vscode/
 .agents/
-*.swp
-*.swo
-*~
-
-# ---------------------------------------------------------------------------
-# Jupyter
-# ---------------------------------------------------------------------------
 .ipynb_checkpoints/
-
-# ---------------------------------------------------------------------------
-# Streamlit
-# ---------------------------------------------------------------------------
-.streamlit/secrets.toml
-configs/dashboard_settings.json
-
-# ---------------------------------------------------------------------------
-# Databases & Local Results (runtime artefacts — do not commit)
-# ---------------------------------------------------------------------------
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-*.sqlite
-*.sqlite3
-results/*
-!results/.gitkeep

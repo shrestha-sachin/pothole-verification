@@ -1,0 +1,85 @@
+{
+  "image_id": "e2_dashcam_20261112_02_0002520",
+  "source_filepath": "data/processed/experiment_2_recordings/dashcam_20261112_02/dashcam_20261112_02_t000000084000.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [
+    {
+      "x": 843,
+      "y": 1924,
+      "w": 153,
+      "h": 88,
+      "_editor_id": "ac62f9a1-9fcb-4fa6-aa34-0fef0f95258b"
+    },
+    {
+      "x": 1084,
+      "y": 2006,
+      "w": 186,
+      "h": 112,
+      "_editor_id": "98059d16-fa80-43e0-aa42-c8934d5df6f0"
+    },
+    {
+      "x": 1220,
+      "y": 1931,
+      "w": 146,
+      "h": 75,
+      "_editor_id": "3f77191d-dcca-4313-b18a-36a70a012904"
+    },
+    {
+      "x": 1013,
+      "y": 1904,
+      "w": 216,
+      "h": 64,
+      "_editor_id": "3e41a910-d212-4161-99c2-3abaa3a9c396"
+    },
+    {
+      "x": 809,
+      "y": 1802,
+      "w": 614,
+      "h": 319,
+      "_editor_id": "2f64c6a0-d105-4e01-baa4-8e8a12ed453a"
+    },
+    {
+      "x": 1560,
+      "y": 1972,
+      "w": 52,
+      "h": 68,
+      "_editor_id": "ff8ec67c-5981-4a50-a326-9f96aa07bdce"
+    },
+    {
+      "x": 1709,
+      "y": 2006,
+      "w": 98,
+      "h": 112,
+      "_editor_id": "4709cc08-5adf-43f7-84d3-25894711fa6a"
+    },
+    {
+      "x": 1563,
+      "y": 1665,
+      "w": 107,
+      "h": 51,
+      "_editor_id": "9557b658-ff04-4f43-a271-0c858c3fe758"
+    },
+    {
+      "x": 1946,
+      "y": 1938,
+      "w": 92,
+      "h": 103,
+      "_editor_id": "5f60ee63-f7a5-4aa5-9565-9f81f0fbfb7c"
+    }
+  ],
+  "negative_regions": [],
+  "annotation_version": 1,
+  "video_id": "dashcam_20261112_02",
+  "timestamp_ms": 84000,
+  "ground_truth_verified": false,
+  "target_annotation_complete": true,
+  "standardized_id": "local_dashcam_video_0003_frame_002520",
+  "parent_video": "local_dashcam_video_0003"
+}

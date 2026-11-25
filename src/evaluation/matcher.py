@@ -502,8 +502,15 @@ def load_video_ground_truth(video_id: str, project_root=None) -> list[GroundTrut
     from pathlib import Path
     root = Path(project_root) if project_root else Path(__file__).resolve().parents[2]
     annotations = []
-    source = root / "data/annotations"
-    paths = list((source / "video").glob("*.json")) + list((source / "experiment_2").glob("*/*.json"))
+    source = root / "data/annotated"
+    legacy = root / "data/annotations"
+    paths = (
+        list((source / "local" / "smartphone" / "metadata").glob("*.json"))
+        + list((source / "local" / "dashcam" / "metadata").glob("*.json"))
+        + list((source / "mapillary" / "metadata").glob("*.json"))
+        + list((legacy / "video").glob("*.json"))
+        + list((legacy / "experiment_2").glob("*/*.json"))
+    )
     for path in sorted(paths):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

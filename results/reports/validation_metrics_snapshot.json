@@ -1,0 +1,367 @@
+{
+  "experiments": {
+    "exp_a_full_90_10": {
+      "validation_passed": true,
+      "preprocessing_mode": "full_frame",
+      "tile_wide_roi": false,
+      "imgsz": 960,
+      "splits": {
+        "train": {
+          "images": 201,
+          "positive_images": 181,
+          "negative_images": 20,
+          "pothole_boxes": 292
+        },
+        "val": {
+          "images": 107,
+          "positive_images": 36,
+          "negative_images": 71,
+          "pothole_boxes": 76
+        },
+        "test": {
+          "images": 15,
+          "positive_images": 12,
+          "negative_images": 3,
+          "pothole_boxes": 12
+        }
+      },
+      "train_composition": {
+        "target": {
+          "positive": 0.9,
+          "hard_negative": 0.08,
+          "ordinary_negative": 0.02
+        },
+        "achieved": {
+          "positive": 0.9005,
+          "hard_negative": 0.0796,
+          "ordinary_negative": 0.0199
+        },
+        "unused_reviewed_negatives_preserved": 873
+      },
+      "roi_stats": {
+        "original_boxes": 380,
+        "retained_boxes": 380,
+        "truncated_boxes": 0,
+        "dropped_boxes_train": 0,
+        "dropped_boxes_eval_misses": 0
+      },
+      "effective_resolution": {},
+      "unique_sources_per_split": {
+        "train": 201,
+        "val": 107,
+        "test": 15
+      },
+      "total_processed_boxes_by_split": {
+        "train": 292,
+        "val": 76,
+        "test": 12
+      }
+    },
+    "exp_c_tiled_90_10": {
+      "validation_passed": true,
+      "preprocessing_mode": "roi",
+      "tile_wide_roi": true,
+      "imgsz": 960,
+      "splits": {
+        "train": {
+          "images": 306,
+          "positive_images": 220,
+          "negative_images": 86,
+          "pothole_boxes": 333
+        },
+        "val": {
+          "images": 199,
+          "positive_images": 48,
+          "negative_images": 151,
+          "pothole_boxes": 95
+        },
+        "test": {
+          "images": 15,
+          "positive_images": 12,
+          "negative_images": 3,
+          "pothole_boxes": 12
+        }
+      },
+      "train_composition": {
+        "target": {
+          "positive": 0.9,
+          "hard_negative": 0.08,
+          "ordinary_negative": 0.02
+        },
+        "achieved": {
+          "positive": 0.719,
+          "hard_negative": 0.0915,
+          "ordinary_negative": 0.0261
+        },
+        "unused_reviewed_negatives_preserved": 873
+      },
+      "roi_stats": {
+        "original_boxes": 380,
+        "retained_boxes": 440,
+        "truncated_boxes": 17,
+        "dropped_boxes_train": 0,
+        "dropped_boxes_eval_misses": 0
+      },
+      "effective_resolution": {},
+      "unique_sources_per_split": {
+        "train": 201,
+        "val": 107,
+        "test": 15
+      },
+      "total_processed_boxes_by_split": {
+        "train": 333,
+        "val": 95,
+        "test": 12
+      }
+    },
+    "exp_d_best_1280": {
+      "validation_passed": true,
+      "preprocessing_mode": "roi",
+      "tile_wide_roi": false,
+      "imgsz": 1280,
+      "splits": {
+        "train": {
+          "images": 201,
+          "positive_images": 181,
+          "negative_images": 20,
+          "pothole_boxes": 292
+        },
+        "val": {
+          "images": 107,
+          "positive_images": 36,
+          "negative_images": 71,
+          "pothole_boxes": 76
+        },
+        "test": {
+          "images": 15,
+          "positive_images": 12,
+          "negative_images": 3,
+          "pothole_boxes": 12
+        }
+      },
+      "train_composition": {
+        "target": {
+          "positive": 0.9,
+          "hard_negative": 0.08,
+          "ordinary_negative": 0.02
+        },
+        "achieved": {
+          "positive": 0.9005,
+          "hard_negative": 0.0796,
+          "ordinary_negative": 0.0199
+        },
+        "unused_reviewed_negatives_preserved": 873
+      },
+      "roi_stats": {
+        "original_boxes": 380,
+        "retained_boxes": 380,
+        "truncated_boxes": 0,
+        "dropped_boxes_train": 0,
+        "dropped_boxes_eval_misses": 0
+      },
+      "effective_resolution": {},
+      "unique_sources_per_split": {
+        "train": 201,
+        "val": 107,
+        "test": 15
+      },
+      "total_processed_boxes_by_split": {
+        "train": 292,
+        "val": 76,
+        "test": 12
+      }
+    },
+    "exp_e_best_80_20": {
+      "validation_passed": true,
+      "preprocessing_mode": "roi",
+      "tile_wide_roi": false,
+      "imgsz": 960,
+      "splits": {
+        "train": {
+          "images": 226,
+          "positive_images": 181,
+          "negative_images": 45,
+          "pothole_boxes": 292
+        },
+        "val": {
+          "images": 107,
+          "positive_images": 36,
+          "negative_images": 71,
+          "pothole_boxes": 76
+        },
+        "test": {
+          "images": 15,
+          "positive_images": 12,
+          "negative_images": 3,
+          "pothole_boxes": 12
+        }
+      },
+      "train_composition": {
+        "target": {
+          "positive": 0.8,
+          "hard_negative": 0.16,
+          "ordinary_negative": 0.04
+        },
+        "achieved": {
+          "positive": 0.8009,
+          "hard_negative": 0.1593,
+          "ordinary_negative": 0.0398
+        },
+        "unused_reviewed_negatives_preserved": 848
+      },
+      "roi_stats": {
+        "original_boxes": 380,
+        "retained_boxes": 380,
+        "truncated_boxes": 0,
+        "dropped_boxes_train": 0,
+        "dropped_boxes_eval_misses": 0
+      },
+      "effective_resolution": {},
+      "unique_sources_per_split": {
+        "train": 226,
+        "val": 107,
+        "test": 15
+      },
+      "total_processed_boxes_by_split": {
+        "train": 292,
+        "val": 76,
+        "test": 12
+      }
+    },
+    "exp_b_roi_90_10": {
+      "validation_passed": true,
+      "preprocessing_mode": "roi",
+      "tile_wide_roi": false,
+      "imgsz": 960,
+      "splits": {
+        "train": {
+          "images": 201,
+          "positive_images": 181,
+          "negative_images": 20,
+          "pothole_boxes": 292
+        },
+        "val": {
+          "images": 107,
+          "positive_images": 36,
+          "negative_images": 71,
+          "pothole_boxes": 76
+        },
+        "test": {
+          "images": 15,
+          "positive_images": 12,
+          "negative_images": 3,
+          "pothole_boxes": 12
+        }
+      },
+      "train_composition": {
+        "target": {
+          "positive": 0.9,
+          "hard_negative": 0.08,
+          "ordinary_negative": 0.02
+        },
+        "achieved": {
+          "positive": 0.9005,
+          "hard_negative": 0.0796,
+          "ordinary_negative": 0.0199
+        },
+        "unused_reviewed_negatives_preserved": 873
+      },
+      "roi_stats": {
+        "original_boxes": 380,
+        "retained_boxes": 380,
+        "truncated_boxes": 0,
+        "dropped_boxes_train": 0,
+        "dropped_boxes_eval_misses": 0
+      },
+      "effective_resolution": {},
+      "unique_sources_per_split": {
+        "train": 201,
+        "val": 107,
+        "test": 15
+      },
+      "total_processed_boxes_by_split": {
+        "train": 292,
+        "val": 76,
+        "test": 12
+      }
+    }
+  },
+  "abc_source_parity": {
+    "train": {
+      "a_eq_b": true,
+      "b_eq_c": true,
+      "count": 201
+    },
+    "val": {
+      "a_eq_b": true,
+      "b_eq_c": true,
+      "count": 107
+    },
+    "test": {
+      "a_eq_b": true,
+      "b_eq_c": true,
+      "count": 15
+    }
+  },
+  "report_path": "C:\\SACHIN\\Projects\\pothole-verification\\results\\reports\\dataset_quality_report.md",
+  "assisted_proposals": {
+    "total": 737,
+    "buckets": {
+      "uncertain_detection": 109,
+      "potential_hard_negative": 509,
+      "high_conf_candidate": 75,
+      "clean_background": 44
+    },
+    "with_boxes": 184,
+    "near_duplicates": 48,
+    "quality_issues": 3,
+    "test_overlap": []
+  },
+  "verifier": {
+    "total_crops": 937,
+    "loader_train": 730,
+    "loader_val": 190,
+    "loader_heldout_test_excluded_from_train": 17,
+    "split_independence": {
+      "checked": true,
+      "overlap_detected": false,
+      "overlapping_groups": [],
+      "sufficient_metadata": true
+    },
+    "split_label_counts": {
+      "test:pothole": 12,
+      "val:pothole": 76,
+      "train:pothole": 292,
+      "train:non_pothole": 438,
+      "val:non_pothole": 114,
+      "test:non_pothole": 5
+    },
+    "negative_totals_by_subtype": {
+      "manhole_cover": 91,
+      "repaired_patch": 220,
+      "crack": 221,
+      "shadow": 17,
+      "other": 8
+    },
+    "negative_by_split_and_subtype": {
+      "train": {
+        "manhole_cover": 52,
+        "repaired_patch": 180,
+        "crack": 206
+      },
+      "val": {
+        "manhole_cover": 39,
+        "repaired_patch": 40,
+        "shadow": 17,
+        "crack": 10,
+        "other": 8
+      },
+      "test": {
+        "crack": 5
+      }
+    },
+    "pad_fractions": [
+      ""
+    ]
+  }
+}

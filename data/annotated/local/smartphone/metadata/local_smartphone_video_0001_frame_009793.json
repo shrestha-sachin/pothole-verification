@@ -1,0 +1,37 @@
+{
+  "image_id": "vid_Green_Bay_Road_5_min_09793",
+  "source_filepath": "data/processed/video_frames/Green_Bay_Road_5_min/Green_Bay_Road_5_min_t000000166003.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [
+    {
+      "x": 1225,
+      "y": 1939,
+      "w": 135,
+      "h": 97,
+      "_editor_id": "3fc43e469a51410f90ba55788ec8a1e5"
+    }
+  ],
+  "negative_regions": [
+    {
+      "x": 1425,
+      "y": 1606,
+      "w": 234,
+      "h": 52,
+      "_editor_id": "d2623bbbb70b4190a948eaa07a5cdbb1",
+      "subtype": "manhole"
+    }
+  ],
+  "annotation_version": 1,
+  "ground_truth_verified": false,
+  "timestamp_ms": 166003,
+  "video_id": "Green_Bay_Road_5_min",
+  "standardized_id": "local_smartphone_video_0001_frame_009793",
+  "parent_video": "local_smartphone_video_0001"
+}

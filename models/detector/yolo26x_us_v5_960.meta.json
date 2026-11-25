@@ -1,0 +1,28 @@
+{
+  "checkpoint": "models/detector/yolo26x_us_v5_960.pt",
+  "architecture": "yolo26x",
+  "base_model": "yolo26x.pt",
+  "experiment_name": "pothole_us_v5_960",
+  "experiment_profile": "legacy_us_v5_full_frame",
+  "dataset_version": "legacy_us_v5",
+  "data_config": "configs/detector_us_v5.yaml",
+  "preprocessing_profile": "full_frame",
+  "tile_wide_roi": false,
+  "source_rois": {},
+  "input_imgsz": 960,
+  "hyperparameters": {
+    "epochs": 50,
+    "batch": 2,
+    "imgsz": 960,
+    "optimizer": "auto",
+    "lr0_logged": 0.01,
+    "amp": true,
+    "seed": 0,
+    "mosaic": 1.0,
+    "close_mosaic": 10,
+    "scale": 0.5,
+    "degrees": 5.0,
+    "shear": 2.0
+  },
+  "notes": "Pre-curation baseline trained before canonical ROI/dataset restructuring (recorded accurately from runs/detector/pothole_us_v5_960/args.yaml)."
+}

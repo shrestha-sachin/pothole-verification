@@ -23,13 +23,15 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import cv2
 import numpy as np
 
+from src.preprocessing.roi import SourceROI
+
 # Ensure Ultralytics config stays inside temporary directory
 os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
 
 logger = logging.getLogger(__name__)
 
 # Default managed directory for annotated videos
-DEFAULT_OUTPUT_DIR = Path("results/annotated_videos")
+DEFAULT_OUTPUT_DIR = Path("results/predictions")
 
 # Standard bounding-box styling (no emojis, professional green)
 BOX_COLOR_BGR = (0, 200, 80)        # Distinct bright green in BGR
@@ -79,6 +81,9 @@ class RenderMetadata:
     total_detections_drawn: int = 0
     unique_track_ids: list[int] = field(default_factory=list)
     ffmpeg_transcoded: bool = False
+    preprocessing_profile: str = "full_frame"
+    tile_wide_roi: bool = False
+    roi_box: Optional[tuple[int, int, int, int]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -337,6 +342,10 @@ class AnnotatedVideoRenderer:
         use_tracking: bool = True,
         max_frames: Optional[int] = None,
         progress_callback: Optional[Callable[[RenderProgress], None]] = None,
+        roi: Optional[SourceROI] = None,
+        preprocessing_profile: str = "full_frame",
+        tile_wide_roi: bool = False,
+        merge_iou: float = 0.50,
     ) -> RenderMetadata:
         """Process video frame-by-frame and produce a complete annotated MP4.
 
@@ -453,6 +462,15 @@ class AnnotatedVideoRenderer:
         processed_frames = 0
         total_detections_drawn = 0
         seen_track_ids: set[int] = set()
+        roi_box_px = roi.to_pixels(source_width, source_height) if roi is not None else None
+
+        tiled_tracker = None
+        if tile_wide_roi and use_tracking:
+            from src.detector.inference import create_botsort_tracker
+            import yaml as _yaml
+
+            tracker_dict = _yaml.safe_load(Path(tracker_cfg_path).read_text(encoding="utf-8")) or {}
+            tiled_tracker = create_botsort_tracker(tracker_dict, device="cpu" if resolved_device in ("auto", "mps") else resolved_device)
 
         try:
             while True:
@@ -463,65 +481,112 @@ class AnnotatedVideoRenderer:
                 if not ok:
                     break
 
-                # Frame-by-frame inference:
-                # Passes BGR ndarray directly to model.track or model.predict
-                if use_tracking:
-                    results = actual_model.track(
-                        frame,
-                        conf=conf_threshold,
-                        iou=iou_threshold,
-                        imgsz=imgsz,
-                        device=resolved_device,
-                        tracker=tracker_cfg_path,
-                        persist=True,
-                        verbose=False,
-                    )
-                else:
-                    results = actual_model.predict(
-                        frame,
-                        conf=conf_threshold,
-                        iou=iou_threshold,
-                        imgsz=imgsz,
-                        device=resolved_device,
-                        verbose=False,
-                    )
-
                 frame_detections = 0
-                for r in results:
-                    if r.boxes is None or len(r.boxes) == 0:
-                        continue
-                    boxes = r.boxes
-                    for box in boxes:
-                        cls_id = int(box.cls[0].item()) if hasattr(box.cls[0], "item") else int(box.cls[0])
-                        if cls_id != target_class_id:
+                if tile_wide_roi:
+                    from src.detector.inference import predict_frame_detections, track_merged_detections
+
+                    merged_preds = predict_frame_detections(
+                        actual_model,
+                        frame,
+                        conf=conf_threshold,
+                        iou=iou_threshold,
+                        imgsz=imgsz,
+                        device=resolved_device,
+                        roi=roi,
+                        tile_wide_roi=True,
+                        merge_iou=merge_iou,
+                        target_class_id=target_class_id,
+                    )
+                    if use_tracking and tiled_tracker is not None:
+                        draw_list = track_merged_detections(tiled_tracker, merged_preds, frame)
+                    else:
+                        draw_list = [{**d, "track_id": None} for d in merged_preds]
+
+                    for d in draw_list:
+                        if float(d["conf"]) < conf_threshold:
                             continue
-                        b_conf = float(box.conf[0].item()) if hasattr(box.conf[0], "item") else float(box.conf[0])
-                        if b_conf < conf_threshold:
-                            continue
-
-                        # Extract track ID if present
-                        track_id = None
-                        if hasattr(boxes, "id") and boxes.id is not None and len(boxes.id) > 0:
-                            raw_id = box.id[0].item() if hasattr(box.id[0], "item") else box.id[0]
-                            if raw_id is not None:
-                                track_id = int(raw_id)
-                                seen_track_ids.add(track_id)
-
-                        # Extract bounding box coordinates
-                        xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy[0], "tolist") else list(box.xyxy[0])
-                        x1, y1, x2, y2 = xyxy
-
+                        tid = d.get("track_id")
+                        if tid is not None:
+                            seen_track_ids.add(int(tid))
                         draw_detection_box(
                             frame=frame,
-                            x1=x1,
-                            y1=y1,
-                            x2=x2,
-                            y2=y2,
-                            conf=b_conf,
-                            track_id=track_id,
+                            x1=d["x1"],
+                            y1=d["y1"],
+                            x2=d["x2"],
+                            y2=d["y2"],
+                            conf=float(d["conf"]),
+                            track_id=tid,
                         )
                         frame_detections += 1
                         total_detections_drawn += 1
+                else:
+                    if roi_box_px is not None:
+                        ox, oy, rx2, ry2 = roi_box_px
+                        infer_frame = frame[oy:ry2, ox:rx2]
+                    else:
+                        ox, oy = 0, 0
+                        infer_frame = frame
+
+                    # Frame-by-frame inference:
+                    # Passes BGR ndarray directly to model.track or model.predict
+                    if use_tracking:
+                        results = actual_model.track(
+                            infer_frame,
+                            conf=conf_threshold,
+                            iou=iou_threshold,
+                            imgsz=imgsz,
+                            device=resolved_device,
+                            tracker=tracker_cfg_path,
+                            persist=True,
+                            verbose=False,
+                        )
+                    else:
+                        results = actual_model.predict(
+                            infer_frame,
+                            conf=conf_threshold,
+                            iou=iou_threshold,
+                            imgsz=imgsz,
+                            device=resolved_device,
+                            verbose=False,
+                        )
+
+                    for r in results:
+                        if r.boxes is None or len(r.boxes) == 0:
+                            continue
+                        boxes = r.boxes
+                        for box in boxes:
+                            cls_id = int(box.cls[0].item()) if hasattr(box.cls[0], "item") else int(box.cls[0])
+                            if cls_id != target_class_id:
+                                continue
+                            b_conf = float(box.conf[0].item()) if hasattr(box.conf[0], "item") else float(box.conf[0])
+                            if b_conf < conf_threshold:
+                                continue
+
+                            # Extract track ID if present
+                            track_id = None
+                            if hasattr(boxes, "id") and boxes.id is not None and len(boxes.id) > 0:
+                                raw_id = box.id[0].item() if hasattr(box.id[0], "item") else box.id[0]
+                                if raw_id is not None:
+                                    track_id = int(raw_id)
+                                    seen_track_ids.add(track_id)
+
+                            # Extract bounding box coordinates
+                            xyxy = box.xyxy[0].tolist() if hasattr(box.xyxy[0], "tolist") else list(box.xyxy[0])
+                            x1, y1, x2, y2 = xyxy
+                            if ox or oy:
+                                x1, y1, x2, y2 = x1 + ox, y1 + oy, x2 + ox, y2 + oy
+
+                            draw_detection_box(
+                                frame=frame,
+                                x1=x1,
+                                y1=y1,
+                                x2=x2,
+                                y2=y2,
+                                conf=b_conf,
+                                track_id=track_id,
+                            )
+                            frame_detections += 1
+                            total_detections_drawn += 1
 
                 writer.write(frame)
                 processed_frames += 1
@@ -611,6 +676,9 @@ class AnnotatedVideoRenderer:
             total_detections_drawn=total_detections_drawn,
             unique_track_ids=sorted(seen_track_ids),
             ffmpeg_transcoded=ffmpeg_transcoded,
+            preprocessing_profile=preprocessing_profile,
+            tile_wide_roi=tile_wide_roi,
+            roi_box=roi_box_px,
         )
 
         # Write companion JSON metadata

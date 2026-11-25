@@ -1,0 +1,46 @@
+{
+  "image_id": "e2_dashcam_20261112_03_0005580",
+  "source_filepath": "data/processed/experiment_2_recordings/dashcam_20261112_03/dashcam_20261112_03_t000000186000.jpg",
+  "image_width": 3840,
+  "image_height": 2160,
+  "review_status": "reviewed",
+  "shadows_present": false,
+  "patches_present": false,
+  "manholes_present": false,
+  "uncertain": false,
+  "notes": "",
+  "pothole_boxes": [],
+  "negative_regions": [
+    {
+      "x": 580,
+      "y": 1741,
+      "w": 179,
+      "h": 61,
+      "_editor_id": "731bd953-e959-4925-ab7b-f0e481415190",
+      "subtype": "manhole"
+    },
+    {
+      "x": 1272,
+      "y": 1779,
+      "w": 155,
+      "h": 56,
+      "_editor_id": "9f8cd0dd-d786-4dd1-8c14-baee69b7e9a6",
+      "subtype": "manhole"
+    },
+    {
+      "x": 1750,
+      "y": 1903,
+      "w": 193,
+      "h": 85,
+      "_editor_id": "5a03feae-76b3-4bac-9602-9c03d96145ce",
+      "subtype": "manhole"
+    }
+  ],
+  "annotation_version": 1,
+  "video_id": "dashcam_20261112_03",
+  "timestamp_ms": 186000,
+  "ground_truth_verified": false,
+  "target_annotation_complete": true,
+  "standardized_id": "local_dashcam_video_0004_frame_005580",
+  "parent_video": "local_dashcam_video_0004"
+}

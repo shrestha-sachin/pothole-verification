@@ -1,0 +1,99 @@
+{
+  "checkpoint": "models/detector/yolo11n_exp_b.pt",
+  "architecture": "yolo11n",
+  "base_model": "models/detector/yolo11n.pt",
+  "base_model_sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+  "experiment_name": "yolo11n_exp_b_roi_960",
+  "experiment_profile": "exp_b_roi_90_10",
+  "dataset_version": "curated_v1",
+  "data_config": "configs/detector.yaml",
+  "manifests": {
+    "master_manifest": "data/manifests/master_manifest.csv",
+    "dataset_summary": "data/splits/dataset_summary.json",
+    "frozen_manifest": "data/manifests/curated_v1_exp_b_roi_90_10_manifest.csv",
+    "frozen_manifest_sha256": "c2f6c1431926c166a813884532a021077e71c07ba3b30551a9e44b278c77195d",
+    "frozen_summary": "data/manifests/curated_v1_exp_b_roi_90_10_summary.json"
+  },
+  "split_counts": {
+    "train": 201,
+    "val": 107,
+    "test": 15
+  },
+  "preprocessing_profile": "roi",
+  "tile_wide_roi": false,
+  "source_rois": {
+    "local_dashcam": [
+      0.04,
+      0.64,
+      0.88,
+      0.992
+    ],
+    "local_smartphone": [
+      0.04,
+      0.46,
+      0.96,
+      0.992
+    ],
+    "mapillary": [
+      0.0,
+      0.5,
+      1.0,
+      1.0
+    ],
+    "rdd2022_usa": [
+      0.0,
+      0.45,
+      1.0,
+      1.0
+    ]
+  },
+  "input_imgsz": 960,
+  "hyperparameters": {
+    "base_model": "models/detector/yolo11n.pt",
+    "base_model_sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+    "base_model_is_coco_pretrained": true,
+    "experiment_profile": "exp_b_roi_90_10",
+    "preprocessing_profile": "roi",
+    "tile_wide_roi": false,
+    "epochs": 100,
+    "patience": 25,
+    "batch": 16,
+    "imgsz": 960,
+    "optimizer": "AdamW",
+    "lr0": 0.001,
+    "amp": true,
+    "seed": 42,
+    "workers": 2,
+    "device": "0",
+    "augmentation": {
+      "mosaic": 0.3,
+      "close_mosaic": 15,
+      "mixup": 0.0,
+      "cutmix": 0.0,
+      "copy_paste": 0.0,
+      "degrees": 3.0,
+      "translate": 0.05,
+      "scale": 0.2,
+      "shear": 0.0,
+      "perspective": 0.0,
+      "fliplr": 0.5,
+      "flipud": 0.0,
+      "hsv_h": 0.01,
+      "hsv_s": 0.3,
+      "hsv_v": 0.25
+    }
+  },
+  "val_metrics": {
+    "precision": 0.2874,
+    "recall": 0.1579,
+    "mAP50": 0.1105,
+    "mAP50_95": 0.0456
+  },
+  "created_at": "2026-11-25T02:51:27.730398+00:00",
+  "package_versions": {
+    "python": "3.13.7",
+    "torch": "2.14.1+cu126",
+    "ultralytics": "8.4.190",
+    "opencv": "5.0.0"
+  }
+}

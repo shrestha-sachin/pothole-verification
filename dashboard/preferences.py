@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 DEFAULT_SETTINGS = {
-    "detector_path": "models/best.pt",
-    "verifier_path": "",
+    "detector_path": "models/detector/yolo26x_us_v5_960.pt",
+    "verifier_path": "models/verifier/verifier_v1.pt",
     "detector_conf": 0.35,
     "detector_iou": 0.45,
     "sample_fps": 5.0,
