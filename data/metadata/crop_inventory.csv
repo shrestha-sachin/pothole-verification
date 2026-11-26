@@ -1,0 +1,1 @@
+crop_id,source_image_id,label,subtype,split,box_x,box_y,box_w,box_h,context_px,crop_x1,crop_y1,crop_x2,crop_y2,crop_width,crop_height,crop_filepath,annotation_source

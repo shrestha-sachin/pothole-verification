@@ -1,0 +1,14 @@
+# YOLO Dataset Configuration - Combined Local Green Bay + RDD2022 US (Balanced)
+# Includes local human-reviewed smartphone annotations plus RDD2022 US pothole positives & subsampled crack negatives.
+path: .
+
+train:
+  - exports/yolo_labels/train.txt
+  - data/processed/rdd2022/train.txt
+
+val:
+  - exports/yolo_labels/val.txt
+  - data/processed/rdd2022/val.txt
+
+names:
+  0: pothole
